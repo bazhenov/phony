@@ -1,4 +1,6 @@
 FROM jupyter/tensorflow-notebook
 
 COPY phony.py /app/
-ENTRYPOINT [ "python", "/app/phony.py" ]
+COPY learn.py /app/
+WORKDIR /app
+ENTRYPOINT [ "python", "/app/learn.py" ]
