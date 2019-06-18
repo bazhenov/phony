@@ -4,6 +4,11 @@ docker-run				= docker run --rm
 mount-private			= -v `pwd`/private:/wd -w /wd
 mount-sources			= -v `pwd`:/wd -w /wd
 
+
+ifdef GPU_IDX
+	gpu = --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=$(GPU_IDX)
+endif
+
 # Test phone prepare augmentator
 test:
 	$(docker-run) $(mount-sources) $(jupyter-container) python test.py
@@ -18,7 +23,7 @@ ipython:
 
 # Learns the model
 learn:
-	$(docker-run) -t $(mount-private) $(phony-container) /learn.py -f input.jsonld -o model.h5 -e 10
+	$(docker-run) -t $(mount-private) $(gpu) $(phony-container) /learn.py -f input.jsonld -o model.h5 -e 10
 
 # Builds a docker container with phony
 build:

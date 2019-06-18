@@ -64,10 +64,9 @@ def build_model():
   model = Sequential()
   model.add(Embedding(256, 2, input_length=64, name="embedding"))
 
-  model.add(Conv1D(32, 5, padding='same', activation='relu', name="conv1d-1"))
-  model.add(Conv1D(32, 9, padding='same', activation='relu', name="conv1d-2"))
-  model.add(Conv1D(32, 13, padding='same', activation='relu', name="conv1d-3"))
-  model.add(Conv1D(32, 13, padding='same', activation='relu', name="conv1d-4"))
+  model.add(Conv1D(32, 13, padding='same', activation='relu', name="conv1d-1"))
+  model.add(Conv1D(32, 19, padding='same', activation='relu', name="conv1d-2"))
+  model.add(Conv1D(32, 25, padding='same', activation='relu', name="conv1d-3"))
   model.add(Dropout(0.1, name="dropout"))
 
   model.add(Dense(1, activation='relu', name="final-dense"))
