@@ -65,11 +65,10 @@ def build_model():
   model.add(Embedding(256, 2, input_length=64, name="embedding"))
 
   model.add(Conv1D(32, 5, padding='same', activation='relu', name="conv1d-1"))
-  model.add(Dropout(0.1, name="dropout-1"))
   model.add(Conv1D(32, 9, padding='same', activation='relu', name="conv1d-2"))
-  model.add(Dropout(0.1, name="dropout-2"))
   model.add(Conv1D(32, 13, padding='same', activation='relu', name="conv1d-3"))
-  model.add(Dropout(0.1, name="dropout-3"))
+  model.add(Conv1D(32, 13, padding='same', activation='relu', name="conv1d-4"))
+  model.add(Dropout(0.1, name="dropout"))
 
   model.add(Dense(1, activation='relu', name="final-dense"))
   model.add(Flatten())
@@ -80,25 +79,24 @@ def build_model():
 if __name__ == "__main__":
   parser = OptionParser()
   parser.add_option("-f", "--file", dest="filename", help="Input file for learning")
-  parser.add_option("-o", "--out", dest="model", help="Filename of the output model")
+  parser.add_option("-o", "--out", dest="model", default="./model.h5", help="Filename of the output model")
+  parser.add_option("-e", "--epochs", dest="epochs", type="int", default=10, help="Number of epochs")
 
   (options, args) = parser.parse_args()
 
-  model_filename = options.model if options.model != None else "./model.h5"
   inp = file(options.filename) if options.filename != None else stdin()
 
   print("Reading samples...")
   X = []
   Y = []
   for sample in read_json(inp):
-    for i in range(100):
-      (x, y) = json2vec(sample)
-      X.append(x)
-      Y.append(y)
+    (x, y) = json2vec(sample)
+    X.append(x)
+    Y.append(y)
 
   model = build_model()
 
-  model.fit(np.array(X), np.array(Y), epochs=1, batch_size=64, validation_split=0.1, shuffle=True)
+  model.fit(np.array(X), np.array(Y), epochs=options.epochs, batch_size=64, validation_split=0.1, shuffle=True)
 
-  print("Saving mode to: " + model_filename)
-  model.save_weights(model_filename)
+  print("Saving mode to: " + options.model)
+  model.save_weights(options.model)

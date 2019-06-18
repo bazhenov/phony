@@ -7,7 +7,7 @@ class Augmentator:
 
   formats = [
     ["#", "+#"],
-    ["###", "(###)", '####', '(####)'],
+    ["###", "-###-", "(###)", '####', '(####)', '-####-'],
     ["###-##-##", "### ## ##", "#######", '####-###', '### ###', '#####']
   ]
 
@@ -93,13 +93,15 @@ if __name__ == "__main__":
   placeholder = "<PHONE>"
 
   for line in sys.stdin:
-    line = json.loads(line.strip())
-    indexes = []
-    while line.find(placeholder) >= 0:
-      phone = (7, rnd.randint(900, 999 + 1), rnd.randint(1000000, 9999999 + 1))
+    line_template = json.loads(line.strip())
+    for i in range(1, 10):
+      line = line_template
+      indexes = []
+      while line.find(placeholder) >= 0:
+        phone = (7, rnd.randint(900, 999 + 1), rnd.randint(1000000, 9999999 + 1))
 
-      index = line.find(placeholder)
-      phone_str = a.format(phone)
-      line = line.replace(placeholder, phone_str, 1)
-      indexes.append([index, index + len(phone_str)])
-    print(json.dumps({'message': line, 'phone_indexes': indexes}, ensure_ascii=False))
+        index = line.find(placeholder)
+        phone_str = a.format(phone)
+        line = line.replace(placeholder, phone_str, 1)
+        indexes.append([index, index + len(phone_str)])
+      print(json.dumps({'message': line, 'phone_indexes': indexes}, ensure_ascii=False))
