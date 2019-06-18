@@ -60,24 +60,7 @@ def json2vec(sample, l=64, start=None):
   
   return (x, y)
 
-if __name__ == "__main__":
-  parser = OptionParser()
-  parser.add_option("-f", "--file", dest="filename", help="Input file for learning")
-
-  (options, args) = parser.parse_args()
-
-  inp = file(options.filename) if options.filename != None else stdin()
-  print("Reading samples...")
-  X = []
-  Y = []
-  for sample in read_json(inp):
-    for i in range(100):
-      (x, y) = json2vec(sample)
-      X.append(x)
-      Y.append(y)
-      
-  print("Examples: " + str(len(X)))
-
+def build_model():
   model = Sequential()
   model.add(Embedding(256, 2, input_length=64, name="embedding"))
 
@@ -92,5 +75,30 @@ if __name__ == "__main__":
   model.add(Flatten())
 
   model.compile(loss='mean_squared_error', optimizer='adam', metrics=['binary_accuracy'])
+  return model
+
+if __name__ == "__main__":
+  parser = OptionParser()
+  parser.add_option("-f", "--file", dest="filename", help="Input file for learning")
+  parser.add_option("-o", "--out", dest="model", help="Filename of the output model")
+
+  (options, args) = parser.parse_args()
+
+  model_filename = options.model if options.model != None else "./model.h5"
+  inp = file(options.filename) if options.filename != None else stdin()
+
+  print("Reading samples...")
+  X = []
+  Y = []
+  for sample in read_json(inp):
+    for i in range(100):
+      (x, y) = json2vec(sample)
+      X.append(x)
+      Y.append(y)
+
+  model = build_model()
 
   model.fit(np.array(X), np.array(Y), epochs=1, batch_size=64, validation_split=0.1, shuffle=True)
+
+  print("Saving mode to: " + model_filename)
+  model.save_weights(model_filename)

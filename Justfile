@@ -1,11 +1,15 @@
-container := "jupyter/tensorflow-notebook"
-docker		:= "docker run --rm -it -v `pwd`:/wd -w /wd " + container
+jupyter-container := "jupyter/tensorflow-notebook"
+phony-container		:= "bazhenov.me/phony"
+docker						:= "docker run --rm -it -v `pwd`:/wd -w /wd"
 
 test:
-	{{docker}} python test.py
+	{{docker}} {{jupyter-container}} python test.py
 
 ipython:
-	{{docker}} ipython
+	{{docker}} {{jupyter-container}} ipython
+
+learn:
+	{{docker}} {{phony-container}} -f private/input.jsonld -o model.h5
 
 build:
-	docker build . -t bazhenov.me/phony
+	docker build . -t {{phony-container}}
