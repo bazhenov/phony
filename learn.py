@@ -1,10 +1,10 @@
 import tensorflow as tf
-from tf.keras.models import Sequential
-from tf.keras.layers import Dense
-from tf.keras.layers import Embedding
-from tf.keras.layers import Conv1D
-from tf.keras.layers import Flatten
-from tf.keras.layers import Dropout
+from tensorflow.python.keras.models import Sequential
+from tensorflow.python.keras.layers import Dense
+from tensorflow.python.keras.layers import Embedding
+from tensorflow.python.keras.layers import Conv1D
+from tensorflow.python.keras.layers import Flatten
+from tensorflow.python.keras.layers import Dropout
 import numpy as np
 import json
 from optparse import OptionParser
@@ -16,7 +16,7 @@ def stdin():
     yield line.strip()
 
 def file(filename):
-  for line in fileinput.input(filename):
+  for line in fileinput.input(filename, openhook=fileinput.hook_encoded("utf-8")):
     yield line.strip()
 
 def read_json(x):
