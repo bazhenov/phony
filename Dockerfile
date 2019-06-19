@@ -1,4 +1,5 @@
-FROM tensorflow/tensorflow:1.11.0-gpu-py3
+ARG TF_VERSION
+FROM tensorflow/tensorflow:$TF_VERSION-py3
 
 COPY phony.py /
 COPY learn.py /

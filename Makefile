@@ -27,6 +27,9 @@ learn: private/input.jsonld
 
 # Builds a docker container with phony
 build:
-	docker build . -t $(phony-container)
+	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1 .
+
+build-gpu:
+	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1-gpu .
 
 .PHONY: build learn test ipython
