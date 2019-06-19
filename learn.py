@@ -1,14 +1,13 @@
 import tensorflow as tf
-from tensorflow.keras import layers
+from tf.keras.models import Sequential
+from tf.keras.layers import Dense
+from tf.keras.layers import Embedding
+from tf.keras.layers import Conv1D
+from tf.keras.layers import Flatten
+from tf.keras.layers import Dropout
 import numpy as np
 import json
 from optparse import OptionParser
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers import Embedding
-from keras.layers import Conv1D
-from keras.layers import Flatten
-from keras.layers import Dropout
 import array
 import fileinput
 
