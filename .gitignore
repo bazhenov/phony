@@ -1,5 +1,6 @@
 /__pycache__
 *.pyc
 /private/*
+target
 /.vscode
 *.h5
