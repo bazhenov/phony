@@ -5,6 +5,8 @@ from tensorflow.python.keras.layers import Embedding
 from tensorflow.python.keras.layers import Conv1D
 from tensorflow.python.keras.layers import Flatten
 from tensorflow.python.keras.layers import Dropout
+from tensorflow.keras import backend as K
+from tensorflow.keras import callbacks
 import numpy as np
 import json
 from optparse import OptionParser
@@ -77,7 +79,7 @@ def build_model():
 if __name__ == "__main__":
   parser = OptionParser()
   parser.add_option("-f", "--file", dest="filename", help="Input file for learning")
-  parser.add_option("-o", "--out", dest="model", default="./model.h5", help="Filename of the output model")
+  parser.add_option("-o", "--out", dest="model", default="./model", help="Filename of the output model")
   parser.add_option("-e", "--epochs", dest="epochs", type="int", default=10, help="Number of epochs")
 
   (options, args) = parser.parse_args()
@@ -93,8 +95,14 @@ if __name__ == "__main__":
     Y.append(y)
 
   model = build_model()
+  model.summary()
 
-  model.fit(np.array(X), np.array(Y), epochs=options.epochs, batch_size=64, validation_split=0.1, shuffle=True)
+  tensorboard_callback = callbacks.TensorBoard(log_dir='./tensorboard', histogram_freq=0, batch_size=32,
+          write_graph=True, write_grads=False, write_images=False, embeddings_freq=0,
+          embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None, update_freq='epoch')
+
+  model.fit(np.array(X), np.array(Y), epochs=options.epochs, batch_size=64, validation_split=0.1, shuffle=True,
+          callbacks=[tensorboard_callback])
 
   print("Saving mode to: " + options.model)
-  model.save_weights(options.model)
+  tf.contrib.saved_model.save_keras_model(model, options.model)

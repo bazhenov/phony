@@ -23,7 +23,7 @@ ipython:
 
 # Learns the model
 learn: private/input.jsonld
-	$(docker-run) -t $(mount-private) $(gpu-flags) $(phony-container) /learn.py -f input.jsonld -o model.h5 -e 10
+	$(docker-run) -t $(mount-private) $(gpu-flags) $(phony-container) /learn.py -f input.jsonld -o ./model -e 10
 
 # Builds a docker container with phony
 build:
