@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::Read;
 use std::error::Error;
 use std::process::exit;
+use std::str::Chars;
 
 use encoding::{Encoding, EncoderTrap};
 use encoding::all::WINDOWS_1251;
@@ -21,8 +22,6 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-	let mut g = Graph::new();
-
 	let mut proto = Vec::new();
 	File::open("../private/model.pb")?.read_to_end(&mut proto)?;
 	let export_dir = "../private/model/1561464809";
@@ -48,7 +47,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 	let mut input_tensor = Tensor::new(&[1, 64]).with_values(&[0f32; 64]).unwrap();
 
-	let text = "Привет, перезвоните мне на +7(907-8O57113 скорее";
+	let text = String::from("Привет, перезвоните мне на +7(907-8O57113 скорее");
 	for (i, c) in text.chars().enumerate().take(64) {
 		let r = WINDOWS_1251.encode(&c.to_string(), EncoderTrap::Strict)?;
 		input_tensor[i] = r[0] as f32;
@@ -61,13 +60,63 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 	session.run(&mut run_args)?;
 
+	let size = 64;
 	let tensor = run_args.fetch::<f32>(output_token)?;
 	
-	for i in 0..64 {
-		if tensor[i] > 0.5 {
-			print!("{}", text.chars().nth(i).unwrap());
-		}
+	let mut vector = vec![0f32; size];
+	for i in 0..size {
+		vector[i] = tensor[i];
 	}
+
+	for (start, stop) in get_indicies(vector, 0.5) {
+		let fragment = text.chars().skip(start).take(stop - start).collect::<String>();
+		println!(" - {}", fragment);
+	}
+
 	println!("");
 	Ok(())
+}
+
+#[derive(PartialEq)]
+enum State {
+	SCANNING, CAPTURING
+}
+
+fn get_indicies<T: PartialOrd + Copy>(list: Vec<T>, t: T) -> Vec<(usize, usize)> {
+	let mut result = vec![];
+	let mut start_index = 0;
+	let mut state = State::SCANNING;
+	for (i, item) in list.iter().enumerate() {
+		state = match (state, *item > t) {
+			(State::SCANNING, false) => State::SCANNING,
+			(State::CAPTURING, true) => State::CAPTURING,
+			(State::SCANNING, true) => {
+				start_index = i;
+				State::CAPTURING
+			},
+			(State::CAPTURING, false) => {
+				result.push((start_index, i));
+				State::SCANNING
+			}
+		}
+	}
+	if state == State::CAPTURING {
+		result.push((start_index, list.len()));
+	}
+	result
+}
+
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn test_get_indicies() {
+		assert_eq!(get_indicies(vec![], 0f32), vec![]);
+
+		assert_eq!(get_indicies(vec![0, 1, 1, 0, 1], 0), vec![(1, 3), (4, 5)]);
+		assert_eq!(get_indicies(vec![0, 1, 1, 0], 0), vec![(1, 3)]);
+
+		assert_eq!(get_indicies(vec![1, 1, 1, 0], 0), vec![(0, 3)]);
+	}
 }
