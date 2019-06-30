@@ -4,9 +4,15 @@ docker-run						= docker run --rm
 mount-private					= -v `pwd`/private:/wd -w /wd
 mount-sources					= -v `pwd`:/wd -w /wd
 
+epochs								= 10
+
 # GPU_IDX is the number of active GPU in nvidia-smi (0 if single GPU is present in the system)
 ifdef GPU_IDX
 	gpu-flags = --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=$(GPU_IDX)
+endif
+
+ifdef EPOCHS
+	epochs = $(EPOCHS)
 endif
 
 # Test phone prepare augmentator
@@ -23,7 +29,8 @@ ipython:
 
 # Learns the model
 learn: private/input.jsonld
-	$(docker-run) -t $(mount-private) $(gpu-flags) $(phony-container) /learn.py -f input.jsonld -o ./model -e 10
+	$(docker-run) -t $(mount-private) $(gpu-flags) $(phony-container) /learn.py -f input.jsonld -o ./model -e $(epochs) \
+		-v 0.05
 
 # Builds a docker container with phony
 build:

@@ -1,10 +1,6 @@
 import tensorflow as tf
-from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Dense
-from tensorflow.python.keras.layers import Embedding
-from tensorflow.python.keras.layers import Conv1D
-from tensorflow.python.keras.layers import Flatten
-from tensorflow.python.keras.layers import Dropout
+from tensorflow.python.keras.models import Model
+from tensorflow.python.keras.layers import Dense, Embedding, Conv1D, Flatten, Dropout, Input
 from tensorflow.keras import backend as K
 from tensorflow.keras import callbacks
 import numpy as np
@@ -62,18 +58,19 @@ def json2vec(sample, l=64, start=None):
   return (x, y)
 
 def build_model():
-  model = Sequential()
-  model.add(Embedding(256, 2, input_length=64, name="embedding"))
+  inputs = Input(shape=(64,), name="input")
+  x = Embedding(256, 4, input_length=64, name="embedding")(inputs)
 
-  model.add(Conv1D(32, 13, padding='same', activation='relu', name="conv1d-1"))
-  model.add(Conv1D(32, 19, padding='same', activation='relu', name="conv1d-2"))
-  model.add(Conv1D(32, 25, padding='same', activation='relu', name="conv1d-3"))
-  model.add(Dropout(0.1, name="dropout"))
+  x = Conv1D(32, 13, padding='same', activation='relu', name="conv1d-1")(x)
+  x = Dropout(0.1, name="dropout-1")(x)
+  x = Conv1D(64, 13, padding='same', activation='relu', name="conv1d-2")(x)
+  x = Dropout(0.1, name="dropout-2")(x)
 
-  model.add(Dense(1, activation='relu', name="final-dense"))
-  model.add(Flatten())
+  x = Dense(1, activation='sigmoid', name="final-dense")(x)
+  prediction = Flatten(name='output')(x)
 
-  model.compile(loss='mean_squared_error', optimizer='adam', metrics=['binary_accuracy'])
+  model = Model(inputs=inputs, outputs = prediction)
+  model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['binary_accuracy'])
   return model
 
 if __name__ == "__main__":
@@ -81,6 +78,7 @@ if __name__ == "__main__":
   parser.add_option("-f", "--file", dest="filename", help="Input file for learning")
   parser.add_option("-o", "--out", dest="model", default="./model", help="Filename of the output model")
   parser.add_option("-e", "--epochs", dest="epochs", type="int", default=10, help="Number of epochs")
+  parser.add_option("-v", "--validation", dest="validation", type="float", default=0.1, help="Validation split ratio")
 
   (options, args) = parser.parse_args()
 
@@ -101,8 +99,8 @@ if __name__ == "__main__":
           write_graph=True, write_grads=False, write_images=False, embeddings_freq=0,
           embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None, update_freq='epoch')
 
-  model.fit(np.array(X), np.array(Y), epochs=options.epochs, batch_size=64, validation_split=0.1, shuffle=True,
-          callbacks=[tensorboard_callback])
+  model.fit(np.array(X), np.array(Y), epochs=options.epochs, batch_size=64, validation_split=options.validation,
+          shuffle=True, callbacks=[tensorboard_callback])
 
   print("Saving mode to: " + options.model)
   tf.contrib.saved_model.save_keras_model(model, options.model)
