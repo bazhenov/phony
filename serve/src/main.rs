@@ -6,7 +6,6 @@ use std::fs::File;
 use std::io::Read;
 use std::error::Error;
 use std::process::exit;
-use std::str::Chars;
 
 use encoding::{Encoding, EncoderTrap};
 use encoding::all::WINDOWS_1251;
@@ -82,25 +81,27 @@ enum State {
 	SCANNING, CAPTURING
 }
 
+/// Возвращает пары (начало, конец) подпоследовательностей.
 fn get_indicies<T: PartialOrd + Copy>(list: Vec<T>, t: T) -> Vec<(usize, usize)> {
+	use State::*;
 	let mut result = vec![];
 	let mut start_index = 0;
-	let mut state = State::SCANNING;
+	let mut state = SCANNING;
 	for (i, item) in list.iter().enumerate() {
 		state = match (state, *item > t) {
-			(State::SCANNING, false) => State::SCANNING,
-			(State::CAPTURING, true) => State::CAPTURING,
-			(State::SCANNING, true) => {
+			(SCANNING, false) => SCANNING,
+			(CAPTURING, true) => CAPTURING,
+			(SCANNING, true) => {
 				start_index = i;
-				State::CAPTURING
+				CAPTURING
 			},
-			(State::CAPTURING, false) => {
+			(CAPTURING, false) => {
 				result.push((start_index, i));
-				State::SCANNING
+				SCANNING
 			}
 		}
 	}
-	if state == State::CAPTURING {
+	if state == CAPTURING {
 		result.push((start_index, list.len()));
 	}
 	result
