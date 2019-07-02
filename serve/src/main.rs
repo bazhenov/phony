@@ -1,10 +1,11 @@
 extern crate tensorflow;
 extern crate encoding;
 
-use tensorflow::{Graph, Session, SessionOptions, SessionRunArgs, Tensor, Operation};
+use tensorflow::{Graph, Session, SessionOptions, SessionRunArgs, Tensor, Operation, Status};
 use std::error::Error;
 use std::process::exit;
 use std::env;
+use std::io::{stdin, Read};
 use clap::App;
 use std::path::Path;
 
@@ -22,15 +23,23 @@ fn main() {
 	let matches = app.get_matches();
 	let model_path = matches.value_of("model").unwrap();
 
-	let text = "Диски в наличии есть?! Может быть есть ещё варианты? Скиньте на вотсап 8 П 924 О 695 Ж 95 А77 Луйста";
-	
-	exit(match run(model_path, text) {
-		Ok(_) => 0,
-		Err(e) => {
-			eprintln!("{}", e);
-			1
+	let mut line = String::new();
+
+	if let Ok((session, graph)) = create_session(model_path) {
+		match stdin().read_to_string(&mut line) {
+			Ok(n) if n <= 0 => exit(0),
+			Ok(_) => {
+				if let Err(e) = run(line.trim(), &session, &graph) {
+					eprintln!("{}", e);
+					exit(1);
+				}
+			},
+			Err(e) => {
+				eprintln!("{}", e);
+				exit(1);
+			}
 		}
-	})
+	}
 }
 
 fn tensor_from_str(string: &str) -> Result<Tensor<f32>, Box<dyn Error>> {
@@ -56,12 +65,15 @@ fn session_run(session: &Session, input: &Operation, input_tensor: &Tensor<f32>,
 	Ok(run_args.fetch::<f32>(output_token)?)
 }
 
-fn run<P: AsRef<Path>>(model_path: P, text: &str) -> Result<(), Box<dyn Error>> {
+fn create_session<P: AsRef<Path>>(model_path: P) -> Result<(Session, Graph), Status> {
 	let mut graph = Graph::new();
 	let tags: Vec<&str> = vec!["serve"];
 	let session_options = SessionOptions::new();
 	let session = Session::from_saved_model(&session_options, tags, &mut graph, model_path)?;
+	Ok((session, graph))
+}
 
+fn run(text: &str, session: &Session, graph: &Graph) -> Result<(), Box<dyn Error>> {
 	let input = graph.operation_by_name_required("input")?;
 	let output = graph.operation_by_name_required("output/Reshape")?;
 
