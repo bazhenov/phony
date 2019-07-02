@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 tensorflow = "^0.13.0"
 encoding = "^0.2"
+clap = "^2.33.0"

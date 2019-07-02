@@ -4,12 +4,27 @@ extern crate encoding;
 use tensorflow::{Graph, Session, SessionOptions, SessionRunArgs, Tensor, Operation};
 use std::error::Error;
 use std::process::exit;
+use std::env;
+use clap::App;
+use std::path::Path;
 
 use encoding::{Encoding, EncoderTrap};
 use encoding::all::WINDOWS_1251;
 
 fn main() {
-	exit(match run() {
+	let app = App::new("phony-serve")
+		.author("Denis Bazhenov <dotsid@gmail.com>")
+		.version("1.0.0")
+		.about("CLI utility for phony classification problem")
+		.arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'");
+
+	env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
+	let matches = app.get_matches();
+	let model_path = matches.value_of("model").unwrap();
+
+	let text = "Диски в наличии есть?! Может быть есть ещё варианты? Скиньте на вотсап 8 П 924 О 695 Ж 95 А77 Луйста";
+	
+	exit(match run(model_path, text) {
 		Ok(_) => 0,
 		Err(e) => {
 			eprintln!("{}", e);
@@ -41,22 +56,14 @@ fn session_run(session: &Session, input: &Operation, input_tensor: &Tensor<f32>,
 	Ok(run_args.fetch::<f32>(output_token)?)
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
-	let export_dir = "../private/model/1561865486";
-
+fn run<P: AsRef<Path>>(model_path: P, text: &str) -> Result<(), Box<dyn Error>> {
 	let mut graph = Graph::new();
 	let tags: Vec<&str> = vec!["serve"];
-	let session = Session::from_saved_model(
-		&SessionOptions::new(),
-		tags,
-		&mut graph,
-		export_dir,
-	)?;
+	let session_options = SessionOptions::new();
+	let session = Session::from_saved_model(&session_options, tags, &mut graph, model_path)?;
 
 	let input = graph.operation_by_name_required("input")?;
 	let output = graph.operation_by_name_required("output/Reshape")?;
-
-	let text = String::from("Диски в наличии есть?! Может быть есть ещё варианты? Скиньте на вотсап 8 П 924 О 695 Ж 95 А77 Луйста");
 
 	let indices = text.char_indices().collect::<Vec<_>>();
 
