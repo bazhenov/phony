@@ -2,8 +2,6 @@ extern crate tensorflow;
 extern crate encoding;
 
 use tensorflow::{Graph, Session, SessionOptions, SessionRunArgs, Tensor, Operation};
-use std::fs::File;
-use std::io::Read;
 use std::error::Error;
 use std::process::exit;
 
@@ -58,15 +56,13 @@ fn run() -> Result<(), Box<dyn Error>> {
 	let input = graph.operation_by_name_required("input")?;
 	let output = graph.operation_by_name_required("output/Reshape")?;
 
-	let text = String::from("Привет, перезвоните мне на +7(907-8O57113 скорее");
+	let text = String::from("Диски в наличии есть?! Может быть есть ещё варианты? Скиньте на вотсап 8 П 924 О 695 Ж 95 А77 Луйста");
 
 	let indices = text.char_indices().collect::<Vec<_>>();
 
 	let chunk_size = 32;
 
 	for chunk in indices.chunks(chunk_size) {
-		let (from, _) = *chunk.first().unwrap();
-		let (to, _) = *chunk.last().unwrap();
 		let chunk_str = chunk.iter()
 			.map(|i| i.1)
 			.collect::<String>();
@@ -84,50 +80,4 @@ fn run() -> Result<(), Box<dyn Error>> {
 	}
 
 	Ok(())
-}
-
-#[derive(PartialEq)]
-enum State {
-	SCANNING, CAPTURING
-}
-
-/// Возвращает пары (начало, конец) подпоследовательностей.
-fn get_indicies<T: PartialOrd + Copy>(list: Vec<T>, t: T) -> Vec<(usize, usize)> {
-	use State::*;
-	let mut result = vec![];
-	let mut start_index = 0;
-	let mut state = SCANNING;
-	for (i, item) in list.iter().enumerate() {
-		state = match (state, *item > t) {
-			(SCANNING, false) => SCANNING,
-			(CAPTURING, true) => CAPTURING,
-			(SCANNING, true) => {
-				start_index = i;
-				CAPTURING
-			},
-			(CAPTURING, false) => {
-				result.push((start_index, i));
-				SCANNING
-			}
-		}
-	}
-	if state == CAPTURING {
-		result.push((start_index, list.len()));
-	}
-	result
-}
-
-mod tests {
-
-	use super::*;
-
-	#[test]
-	fn test_get_indicies() {
-		assert_eq!(get_indicies(vec![], 0f32), vec![]);
-
-		assert_eq!(get_indicies(vec![0, 1, 1, 0, 1], 0), vec![(1, 3), (4, 5)]);
-		assert_eq!(get_indicies(vec![0, 1, 1, 0], 0), vec![(1, 3)]);
-
-		assert_eq!(get_indicies(vec![1, 1, 1, 0], 0), vec![(0, 3)]);
-	}
 }
