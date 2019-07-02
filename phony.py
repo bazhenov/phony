@@ -94,7 +94,7 @@ if __name__ == "__main__":
 
   for line in sys.stdin:
     line_template = json.loads(line.strip())
-    for i in range(1, 10):
+    for i in range(1, 100):
       line = line_template
       indexes = []
       while line.find(placeholder) >= 0:
@@ -104,4 +104,4 @@ if __name__ == "__main__":
         phone_str = a.format(phone)
         line = line.replace(placeholder, phone_str, 1)
         indexes.append([index, index + len(phone_str)])
-      print(json.dumps({'message': line, 'phone_indexes': indexes}, ensure_ascii=False))
+        print(json.dumps({'message': line, 'phone_indexes': indexes}, ensure_ascii=False))
