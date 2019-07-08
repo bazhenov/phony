@@ -26,13 +26,30 @@ fn numerate_part(base: &mut String, n: u32) {
       base.push(' ');
       numerate_part(base, n % 10);
     },
-    x if x < 1000 => {
+    x if x <= 1000 => {
       base.push_str(NUMBERS_100[(x % 1000 / 100) as usize]);
       base.push(' ');
       numerate_part(base, n % 100);
     }
     _ => panic!("Not implmented for numbers greater than 999")
   }
+}
+
+type Phone = (u16, u16, u32);
+
+fn phone_format(phone: Phone, format: &str) -> String {
+	let mut result = String::with_capacity(format.len());
+	let phone_string = format!("{}{}{}", phone.0, phone.1, phone.2);
+	let mut i = 0usize;
+	for c in format.chars() {
+		if c == '#' {
+			result.push(phone_string.chars().nth(i).unwrap());
+			i += 1;
+		} else {
+			result.push(c);
+		}
+	}
+	result
 }
 
 #[cfg(test)]
@@ -52,4 +69,9 @@ mod tests {
     assert_eq!(numerate(833), "восемьсот тридцать три");
     assert_eq!(numerate(916), "девятьсот шестнадцать");
   }
+
+	#[test]
+	fn test_number_format() {
+		assert_eq!(phone_format((7, 999, 3053315), "+# (###) ###-##-##"), "+7 (999) 305-33-15");
+	}
 }
