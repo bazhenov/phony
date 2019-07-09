@@ -26,19 +26,53 @@ fn main() {
 	let mut line = String::new();
 
 	if let Ok((session, graph)) = create_session(model_path) {
-		match stdin().read_to_string(&mut line) {
-			Ok(n) if n <= 0 => exit(0),
-			Ok(_) => {
-				if let Err(e) = run(line.trim(), &session, &graph) {
+		loop {
+			match stdin().read_to_string(&mut line) {
+				Ok(0) => break,
+				
+				Ok(_) => {
+					if let Err(e) = run(line.trim(), &session, &graph) {
+						eprintln!("{}", e);
+						exit(1);
+					}
+				},
+				
+				Err(e) => {
 					eprintln!("{}", e);
 					exit(1);
 				}
-			},
-			Err(e) => {
-				eprintln!("{}", e);
-				exit(1);
 			}
 		}
+	}
+}
+
+pub trait TensorflowProblem<E> {
+
+	fn tensor_from_example(example: E) -> Result<Tensor<f32>, Box<dyn Error>>;
+
+	fn retrieve_input_output_operation(graph: &Graph) -> Result<(Operation, Operation), Status>;
+}
+
+struct PhonyProblem {}
+
+impl TensorflowProblem<&str> for PhonyProblem {
+
+	fn tensor_from_example(e: &str) -> Result<Tensor<f32>, Box<dyn Error>> {
+		let len = e.chars().count();
+
+		let mut tensor = Tensor::new(&[1, len as u64]);
+		for (i, c) in e.chars().enumerate() {
+			let r = WINDOWS_1251.encode(&c.to_string(), EncoderTrap::Strict)?;
+			tensor[i] = r[0] as f32;
+		}
+		Ok(tensor)
+	}
+
+	fn retrieve_input_output_operation(graph: &Graph) -> Result<(Operation, Operation), Status> {
+		let input = graph.operation_by_name_required("input")?;
+		let output = graph.operation_by_name_required("output/Reshape")?;
+
+		Ok((input, output))
 	}
 }
 
@@ -99,4 +133,42 @@ fn run(text: &str, session: &Session, graph: &Graph) -> Result<(), Box<dyn Error
 	}
 
 	Ok(())
+}
+
+struct CharacterNgrams<'a> {
+	text: &'a str,
+	n: usize,
+	pos: usize
+}
+
+impl<'a> Iterator for CharacterNgrams<'a> {
+	type Item = &'a str;
+
+	fn next(&mut self) -> Option<&'a str> {
+		if self.text.len() - self.pos < self.n {
+			return None;
+		}
+		let result = Some(&self.text[self.pos..self.pos + self.n]);
+		self.pos += 1;
+		result
+	}
+}
+
+fn character_ngrams<'a>(text: &'a str, n: usize) -> CharacterNgrams<'a> {
+	CharacterNgrams { text, n, pos: 0 }
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn text_segmentate() {
+		let mut l = character_ngrams("12345", 3);
+		assert_eq!(l.next(), Some("123"));
+		assert_eq!(l.next(), Some("234"));
+		assert_eq!(l.next(), Some("345"));
+		assert_eq!(l.next(), None);
+	}
 }
