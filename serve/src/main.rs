@@ -8,6 +8,8 @@ use std::env;
 use std::io::{stdin, Read};
 use clap::App;
 use std::path::Path;
+use std::str::CharIndices;
+use std::iter::Skip;
 
 use encoding::{Encoding, EncoderTrap};
 use encoding::all::WINDOWS_1251;
@@ -135,27 +137,40 @@ fn run(text: &str, session: &Session, graph: &Graph) -> Result<(), Box<dyn Error
 	Ok(())
 }
 
-struct CharacterNgrams<'a> {
+pub struct CharNgrams<'a> {
 	text: &'a str,
-	n: usize,
-	pos: usize
+	position: (usize, usize)
 }
 
-impl<'a> Iterator for CharacterNgrams<'a> {
+fn advance_character(text: &str, pos: usize, n: usize) -> usize {
+	let mut pos = pos;
+	for _ in 0..n {
+		pos += 1;
+		while !text.is_char_boundary(pos) && pos <= text.len() {
+			pos += 1;
+		}
+	}
+	pos
+}
+
+impl<'a> Iterator for CharNgrams<'a> {
 	type Item = &'a str;
 
-	fn next(&mut self) -> Option<&'a str> {
-		if self.text.len() - self.pos < self.n {
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.position.1 > self.text.len() {
 			return None;
 		}
-		let result = Some(&self.text[self.pos..self.pos + self.n]);
-		self.pos += 1;
+		let result = Some(&self.text[self.position.0..self.position.1]);
+
+		self.position.0 = advance_character(self.text, self.position.0, 1);
+		self.position.1 = advance_character(self.text, self.position.1, 1);
+		
 		result
 	}
 }
 
-fn character_ngrams<'a>(text: &'a str, n: usize) -> CharacterNgrams<'a> {
-	CharacterNgrams { text, n, pos: 0 }
+pub fn character_ngrams<'a>(text: &'a str, n: usize) -> CharNgrams<'a> {
+	CharNgrams { text, position: (0, advance_character(text, 0, n)) }
 }
 
 #[cfg(test)]
@@ -169,6 +184,28 @@ mod tests {
 		assert_eq!(l.next(), Some("123"));
 		assert_eq!(l.next(), Some("234"));
 		assert_eq!(l.next(), Some("345"));
+		assert_eq!(l.next(), None);
+	}
+
+	#[test]
+	fn ngrams_from_utf8_text() {
+		let mut l = character_ngrams("абвгд", 3);
+		assert_eq!(l.next(), Some("абв"));
+		assert_eq!(l.next(), Some("бвг"));
+		assert_eq!(l.next(), Some("вгд"));
+		assert_eq!(l.next(), None);
+	}
+
+	#[test]
+	fn ngrams_from_short_text() {
+		let mut l = character_ngrams("абвгд", 6);
+		assert_eq!(l.next(), None);
+	}
+
+	#[test]
+	fn ngrams_from_one_char() {
+		let mut l = character_ngrams("1", 1);
+		assert_eq!(l.next(), Some("1"));
 		assert_eq!(l.next(), None);
 	}
 }
