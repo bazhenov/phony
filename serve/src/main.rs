@@ -160,7 +160,8 @@ impl<'a> Iterator for CharNgrams<'a> {
 		if self.position.1 > self.text.len() {
 			return None;
 		}
-		let result = Some(&self.text[self.position.0..self.position.1]);
+		let span = self.position.0..self.position.1;
+		let result = Some(&self.text[span]);
 
 		self.position.0 = advance_character(self.text, self.position.0, 1);
 		self.position.1 = advance_character(self.text, self.position.1, 1);
