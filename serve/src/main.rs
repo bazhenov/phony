@@ -1,15 +1,13 @@
 extern crate tensorflow;
 extern crate encoding;
 
-use tensorflow::{Graph, Session, SessionOptions, SessionRunArgs, Tensor, Operation, Status};
+use tensorflow::{Graph, Session, SessionOptions, SessionRunArgs, Tensor, Operation, Status, FetchToken};
 use std::error::Error;
 use std::process::exit;
 use std::env;
 use std::io::{stdin, Read};
 use clap::App;
 use std::path::Path;
-use std::str::CharIndices;
-use std::iter::Skip;
 
 use encoding::{Encoding, EncoderTrap};
 use encoding::all::WINDOWS_1251;
@@ -27,15 +25,25 @@ fn main() {
 
 	let mut line = String::new();
 
-	if let Ok((session, graph)) = create_session(model_path) {
+	if let Ok(runner) = TensorflowRunner::create_session(model_path) {
 		loop {
 			match stdin().read_to_string(&mut line) {
 				Ok(0) => break,
 				
 				Ok(_) => {
-					if let Err(e) = run(line.trim(), &session, &graph) {
-						eprintln!("{}", e);
-						exit(1);
+					let line = line.trim();
+					match runner.run_problem(PhonyProblem{}, line) {
+						Ok(mask) => {
+							let mask_text  = mask.iter()
+								.map(|c| if *c { '^' } else { ' ' })
+								.collect::<String>();
+							println!("{}", line);
+							println!("{}", mask_text);
+						},
+						Err(e) => {
+							eprintln!("{}", e);
+							exit(1);
+						}
 					}
 				},
 				
@@ -48,18 +56,71 @@ fn main() {
 	}
 }
 
-pub trait TensorflowProblem<E> {
+struct TensorflowRunner {
+	session: Session,
+	graph: Graph
+}
 
-	fn tensor_from_example(example: E) -> Result<Tensor<f32>, Box<dyn Error>>;
+impl TensorflowRunner {
 
-	fn retrieve_input_output_operation(graph: &Graph) -> Result<(Operation, Operation), Status>;
+	fn create_session<P: AsRef<Path>>(model_path: P) -> Result<Self, Status> {
+		let mut graph = Graph::new();
+		let tags: Vec<&str> = vec!["serve"];
+		let session_options = SessionOptions::new();
+		let session = Session::from_saved_model(&session_options, tags, &mut graph, model_path)?;
+		Ok(TensorflowRunner { session, graph })
+	}
+
+	fn run_problem<I, O>(&self, problem: impl TensorflowProblem<I, O>, example: I) -> Result<O, Box<dyn Error>> {
+		let input = problem.tensor_from_example(example)?;
+
+		let (input_op, output_op) = problem.retrieve_input_output_operation(&self.graph)?;
+		let mut run_args = SessionRunArgs::new();
+
+		run_args.add_feed(&input_op, 0, &input);
+		let output_token = run_args.request_fetch(&output_op, 0);
+
+		self.session.run(&mut run_args)?;
+
+		let output = problem.fetch_tensor(&mut run_args, output_token)?;
+		Ok(problem.output_from_tensor(output))
+	}
+}
+
+/// Микрофреймворк для решения задач при помощи библиотеки Tensorflow.
+/// 
+/// Подразумевается, что используя framework программист определяет следующие аспекты поведения:
+/// * как из модели достать точки входа и выхода. Вход – это placeholder, который определяется при помощи
+/// входного тензора. Выход – это ответ системы, который содержит пометку класса или любую другую информацию, которая
+/// является целью вычислений.
+/// * как из примера получить тензор
+pub trait TensorflowProblem<I, O> {
+
+	/// Тип тензора-входа (`u32`/`f32` и т.д.)
+	type TensorInputType: tensorflow::TensorType;
+
+	/// Тип тензора-выхода (`u32`/`f32` и т.д.)
+	type TensorOutputType: tensorflow::TensorType;
+
+	fn tensor_from_example(&self, example: I) -> Result<Tensor<Self::TensorInputType>, Box<dyn Error>>;
+
+	fn retrieve_input_output_operation(&self, graph: &Graph) -> Result<(Operation, Operation), Status>;
+
+	fn output_from_tensor(&self, tensor: Tensor<Self::TensorOutputType>) -> O;
+
+	fn fetch_tensor(&self, args: &mut SessionRunArgs, token: FetchToken) -> Result<Tensor<Self::TensorOutputType>, Status> {
+		args.fetch::<Self::TensorOutputType>(token)
+	}
 }
 
 struct PhonyProblem {}
 
-impl TensorflowProblem<&str> for PhonyProblem {
+impl TensorflowProblem<&str, Vec<bool>> for PhonyProblem {
 
-	fn tensor_from_example(e: &str) -> Result<Tensor<f32>, Box<dyn Error>> {
+	type TensorInputType = f32;
+	type TensorOutputType = f32;
+
+	fn tensor_from_example(&self, e: &str) -> Result<Tensor<Self::TensorInputType>, Box<dyn Error>> { 
 		let len = e.chars().count();
 
 		let mut tensor = Tensor::new(&[1, len as u64]);
@@ -70,71 +131,20 @@ impl TensorflowProblem<&str> for PhonyProblem {
 		Ok(tensor)
 	}
 
-	fn retrieve_input_output_operation(graph: &Graph) -> Result<(Operation, Operation), Status> {
+	fn retrieve_input_output_operation(&self, graph: &Graph) -> Result<(Operation, Operation), Status> {
 		let input = graph.operation_by_name_required("input")?;
 		let output = graph.operation_by_name_required("output/Reshape")?;
 
 		Ok((input, output))
 	}
-}
 
-fn tensor_from_str(string: &str) -> Result<Tensor<f32>, Box<dyn Error>> {
-	let len = string.chars().count();
-
-	let mut tensor = Tensor::new(&[1, len as u64]);
-	for (i, c) in string.chars().enumerate() {
-		let r = WINDOWS_1251.encode(&c.to_string(), EncoderTrap::Strict)?;
-		tensor[i] = r[0] as f32;
-	}
-	Ok(tensor)
-}
-
-fn session_run(session: &Session, input: &Operation, input_tensor: &Tensor<f32>,
-							 output: &Operation) -> Result<Tensor<f32>, Box<dyn Error>> {
-	let mut run_args = SessionRunArgs::new();
-
-	run_args.add_feed(&input, 0, &input_tensor);
-	let output_token = run_args.request_fetch(&output, 0);
-
-	session.run(&mut run_args)?;
-
-	Ok(run_args.fetch::<f32>(output_token)?)
-}
-
-fn create_session<P: AsRef<Path>>(model_path: P) -> Result<(Session, Graph), Status> {
-	let mut graph = Graph::new();
-	let tags: Vec<&str> = vec!["serve"];
-	let session_options = SessionOptions::new();
-	let session = Session::from_saved_model(&session_options, tags, &mut graph, model_path)?;
-	Ok((session, graph))
-}
-
-fn run(text: &str, session: &Session, graph: &Graph) -> Result<(), Box<dyn Error>> {
-	let input = graph.operation_by_name_required("input")?;
-	let output = graph.operation_by_name_required("output/Reshape")?;
-
-	let indices = text.char_indices().collect::<Vec<_>>();
-
-	let chunk_size = 32;
-
-	for chunk in indices.chunks(chunk_size) {
-		let chunk_str = chunk.iter()
-			.map(|i| i.1)
-			.collect::<String>();
-		let input_tensor = tensor_from_str(&chunk_str)?;
-		let output_tensor = session_run(&session, &input, &input_tensor, &output)?;
-		let mut vector = vec![0f32; chunk_size];
-		for i in 0..chunk.len() {
-			vector[i] = output_tensor[i];
+	fn output_from_tensor(&self, tensor: Tensor<Self::TensorOutputType>) -> Vec<bool> {
+		let mut result = vec![false; 32];
+		for i in 0..14 {
+			result[i] = tensor[i] > 0.5;
 		}
-		let mask_str = vector.iter()
-			.map(|i| if *i >= 0.5 { '^' } else { ' ' })
-			.collect::<String>();
-		println!("{}", chunk_str);
-		println!("{}", mask_str);
+		result
 	}
-
-	Ok(())
 }
 
 pub struct CharNgrams<'a> {
