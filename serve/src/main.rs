@@ -1,7 +1,7 @@
 extern crate tensorflow;
 extern crate encoding;
 
-use tensorflow::{Graph, Session, SessionOptions, SessionRunArgs, Tensor, Operation, Status, FetchToken};
+use tensorflow::{Graph, Session, SessionOptions, SessionRunArgs, Tensor, Operation, Status, FetchToken, TensorType};
 use std::error::Error;
 use std::process::exit;
 use std::env;
@@ -32,7 +32,7 @@ fn main() {
 				
 				Ok(_) => {
 					let line = line.trim();
-					match runner.run_problem(PhonyProblem{}, line) {
+					match runner.run_problem(PhonyProblem{}, &line) {
 						Ok(mask) => {
 							let mask_text  = mask.iter()
 								.map(|c| if *c { '^' } else { ' ' })
@@ -72,18 +72,15 @@ impl TensorflowRunner {
 	}
 
 	fn run_problem<I, O>(&self, problem: impl TensorflowProblem<I, O>, example: I) -> Result<O, Box<dyn Error>> {
-		let input = problem.tensor_from_example(example)?;
+		let inputs = problem.tensors_from_example(&example)?;
 
 		let (input_op, output_op) = problem.retrieve_input_output_operation(&self.graph)?;
-		let mut run_args = SessionRunArgs::new();
 
-		run_args.add_feed(&input_op, 0, &input);
-		let output_token = run_args.request_fetch(&output_op, 0);
+		let outputs = inputs.iter()
+			.map(|t| problem.feed(&self.session, &input_op, &output_op, t).unwrap())
+			.collect::<Vec<_>>();
 
-		self.session.run(&mut run_args)?;
-
-		let output = problem.fetch_tensor(&mut run_args, output_token)?;
-		Ok(problem.output_from_tensor(output))
+		Ok(problem.output_from_tensors(&example, outputs))
 	}
 }
 
@@ -94,41 +91,64 @@ impl TensorflowRunner {
 /// входного тензора. Выход – это ответ системы, который содержит пометку класса или любую другую информацию, которая
 /// является целью вычислений.
 /// * как из примера получить тензор
-pub trait TensorflowProblem<I, O> {
+pub trait TensorflowProblem<I: ?Sized, O> {
 
 	/// Тип тензора-входа (`u32`/`f32` и т.д.)
-	type TensorInputType: tensorflow::TensorType;
+	type TensorInputType: TensorType;
 
 	/// Тип тензора-выхода (`u32`/`f32` и т.д.)
-	type TensorOutputType: tensorflow::TensorType;
+	type TensorOutputType: TensorType;
 
-	fn tensor_from_example(&self, example: I) -> Result<Tensor<Self::TensorInputType>, Box<dyn Error>>;
+	fn tensors_from_example(&self, example: &I) -> Result<Vec<Tensor<Self::TensorInputType>>, Box<dyn Error>>;
 
 	fn retrieve_input_output_operation(&self, graph: &Graph) -> Result<(Operation, Operation), Status>;
 
-	fn output_from_tensor(&self, tensor: Tensor<Self::TensorOutputType>) -> O;
+	fn output_from_tensors(&self, example: &I, tensors: Vec<Tensor<Self::TensorOutputType>>) -> O;
 
 	fn fetch_tensor(&self, args: &mut SessionRunArgs, token: FetchToken) -> Result<Tensor<Self::TensorOutputType>, Status> {
 		args.fetch::<Self::TensorOutputType>(token)
 	}
+
+	fn feed(&self, session: &Session, input_op: &Operation, output_op: &Operation, input: &Tensor<Self::TensorInputType>)
+			-> Result<Tensor<Self::TensorOutputType>, Box<dyn Error>> {
+		
+		let mut run_args = SessionRunArgs::new();
+		run_args.add_feed(&input_op, 0, input);
+		let output_token = run_args.request_fetch(&output_op, 0);
+
+		session.run(&mut run_args)?;
+
+		Ok(run_args.fetch(output_token)?)
+	}
 }
 
 struct PhonyProblem {}
+
+impl PhonyProblem {
+	
+	fn str_to_tensor<T>(string: &str) -> Result<Tensor<T>, Box<dyn Error>>
+			where T: From<u8> + TensorType {
+		
+		let len = string.chars().count();
+
+		let mut tensor: Tensor<T> = Tensor::new(&[1, len as u64]);
+		for (i, c) in string.chars().enumerate() {
+			let r = WINDOWS_1251.encode(&c.to_string(), EncoderTrap::Strict)?;
+			tensor[i] = r[0].into();
+		}
+		Ok(tensor)
+	}
+}
 
 impl TensorflowProblem<&str, Vec<bool>> for PhonyProblem {
 
 	type TensorInputType = f32;
 	type TensorOutputType = f32;
 
-	fn tensor_from_example(&self, e: &str) -> Result<Tensor<Self::TensorInputType>, Box<dyn Error>> { 
-		let len = e.chars().count();
-
-		let mut tensor = Tensor::new(&[1, len as u64]);
-		for (i, c) in e.chars().enumerate() {
-			let r = WINDOWS_1251.encode(&c.to_string(), EncoderTrap::Strict)?;
-			tensor[i] = r[0] as f32;
-		}
-		Ok(tensor)
+	fn tensors_from_example(&self, e: &&str) -> Result<Vec<Tensor<Self::TensorInputType>>, Box<dyn Error>> {
+		character_ngrams(e, 16)
+			.map(PhonyProblem::str_to_tensor)
+			.collect()
 	}
 
 	fn retrieve_input_output_operation(&self, graph: &Graph) -> Result<(Operation, Operation), Status> {
@@ -138,12 +158,18 @@ impl TensorflowProblem<&str, Vec<bool>> for PhonyProblem {
 		Ok((input, output))
 	}
 
-	fn output_from_tensor(&self, tensor: Tensor<Self::TensorOutputType>) -> Vec<bool> {
-		let mut result = vec![false; 32];
-		for i in 0..14 {
-			result[i] = tensor[i] > 0.5;
+	fn output_from_tensors(&self, _example: &&str, tensors: Vec<Tensor<Self::TensorOutputType>>) -> Vec<bool> {
+		let mut mask = vec![0u8; _example.len()];
+		let tensors_length = tensors.len() as u8;
+		let length = tensors[0].dims()[1] as usize;
+		for (offset, tensor) in tensors.iter().enumerate() {
+			for i in 0..length {
+				if tensor[i] > 0.5 {
+					mask[i + offset] += 1;
+				}
+			}
 		}
-		result
+		mask.iter().map(|i| *i > tensors_length / 2).collect()
 	}
 }
 
