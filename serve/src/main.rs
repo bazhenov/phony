@@ -195,10 +195,7 @@ impl TensorflowProblem for PhonyProblem {
 	}
 
 	fn tensors_from_example(&self, _e: &Self::Input) -> Result<Vec<Tensor<Self::TensorInputType>>, Box<dyn Error>> {
-		use encoding::DecoderTrap;
-
 		Ok(self.chars.windows(Self::WINDOW)
-			.inspect(|w| println!(" --- {}", WINDOWS_1251.decode(w, DecoderTrap::Strict).unwrap()))
 			.map(PhonyProblem::create_tensor)
 			.collect())
 	}
@@ -211,39 +208,41 @@ impl TensorflowProblem for PhonyProblem {
 	}
 
 	fn output_from_tensors(&self, _example: &Self::Input, tensors: Vec<Tensor<Self::TensorOutputType>>) -> Vec<bool> {
-		// Маска из двух числе – первое сколько раз указанное число было пропущено через модель TF
-		// второе - сколько раз модель дала положительный результат
-		let mut mask = vec![(0u8, 0u8); self.chars.len()];
+		let mut mask = vec![Accumulator(0, 0); self.chars.len()];
 		let character_length = self.chars.len() - self.left_padding - self.right_padding;
 		
 		let length = tensors[0].dims()[1] as usize;
 		for (offset, tensor) in tensors.iter().enumerate() {
 			for i in 0..length {
-				mask[i + offset].0 += 1;
-				if tensor[i] > 0.5 {
-					mask[i + offset].1 += 1;
-				}
+				mask[i + offset].register(tensor[i] > 0.5);
 			}
 		}
 		mask.iter()
-			.map(|i| i.1 > i.0 / 2)
+			.map(|a| a.ratio() > 0.5)
+			// отрезаем от маски "хвостики" порожденные padding'ом строки
 			.skip(self.left_padding)
 			.take(character_length)
 			.collect()
 	}
 }
 
+/// Простой счетчик – регистририует количество ложных/положительных срабатываный. Метод [`register`](#method.register)
+#[derive(Copy, Clone)]
 struct Accumulator(u16, u16);
 
 impl Accumulator {
 
-	fn hit(&mut self) {
-		self.0 += 1;
+	/// Регистрирует срабатывание: ложное или положительное в зависимости от значения аргумента `hit`.
+	fn register(&mut self, hit: bool) {
+		if hit {
+			self.0 += 1;
+		}
 		self.1 += 1;
 	}
 
-	fn miss(&mut self) {
-		self.0 += 1;
+	/// доля положительных вызовов по отношению к общему количеству
+	fn ratio(&self) -> f32 {
+		self.0 as f32 / self.1 as f32
 	}
 }
 
