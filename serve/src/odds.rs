@@ -14,7 +14,7 @@ mod odds {
 		where T: Copy {
 
 		fn choose_random(&self) -> T {
-			let mut sum = self.sum();
+			let sum = self.sum();
 			let mut n = thread_rng().gen_range(0, sum);
 			let mut iterator = self.iter();
 			while let Some(Odds(odds, inner)) = iterator.next() {

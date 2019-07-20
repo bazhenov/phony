@@ -1,4 +1,5 @@
 mod odds;
+mod digits;
 
 const NUMBERS: [&str; 10] = ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"];
 const NUMBERS_TENTH: [&str; 10] = ["десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать",
@@ -53,6 +54,19 @@ fn phone_format(phone: Phone, format: &str) -> String {
 	result
 }
 
+trait PhoneFormat {
+
+	fn format_as_phone(&self, format: &str) -> Option<String>;
+}
+
+impl<T> PhoneFormat for T where f32: From<T>, T: Copy {
+
+	fn format_as_phone(&self, format: &str) -> Option<String> {
+		let magnitude = f32::from(*self).log10().ceil() as u8;
+		Some(String::from(format!("{}", magnitude)))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -74,5 +88,10 @@ mod tests {
 	#[test]
 	fn test_number_format() {
 		assert_eq!(phone_format((7, 999, 3053315), "+# (###) ###-##-##"), "+7 (999) 305-33-15");
+	}
+
+	#[test]
+	fn format_phone_part() {
+		assert_eq!(314_u16.format_as_phone("(###)"), Some("(314)".to_string())); 
 	}
 }
