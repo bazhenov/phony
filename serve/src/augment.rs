@@ -1,14 +1,74 @@
+#[macro_use]
+extern crate clap;
+
 mod digits;
 mod numerate;
 mod odds;
 
+use clap::App;
 use digits::Digits;
 use numerate::numerate;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
+use std::io::{stdin, Read};
+use std::process::exit;
 
-fn main() {}
+fn main() {
+    let app = App::new("phone-generate")
+        .author("Denis Bazhenov <dotsid@gmail.com>")
+        .version("1.0.0")
+        .about("CLI utility for synthetic augmentation of phone numbers")
+        .arg_from_usage(
+            "[random] -r, --random=[COUNT] 'Generate given number of random phone numbers'",
+        )
+        .arg_from_usage("[stream] -s, --stream 'Generating numbers for stream of input examples'");
+
+    let matches = app.get_matches();
+    let random = value_t!(matches, "random", u32).unwrap_or(0);
+    let stream_mode = matches.is_present("stream");
+
+    let generator = prepare_generator();
+
+    if random > 0 {
+        for _ in 0..random {
+            println!("{}", generator.generate_random());
+        }
+    } else if stream_mode {
+        let mut line = String::new();
+
+        loop {
+            match stdin().read_to_string(&mut line) {
+                Ok(0) => break,
+
+                Ok(n) => {
+                    let line = line.trim();
+                    println!("{}", line);
+                }
+
+                Err(e) => {
+                    eprintln!("{}", e);
+                    exit(1);
+                }
+            }
+        }
+    }
+}
+
+fn prepare_generator() -> PhoneGenerator {
+    let mut generator = PhoneGenerator::new("+#", "###", "#######");
+    generator.register_country_formats(vec!["#"]);
+    generator.register_region_formats(vec![" (###) ", "-###-"]);
+    generator.register_number_formats(vec!["###-##-##", "### ## ##"]);
+
+    generator.register_rule(Box::new(AsDigitPhoneFormat::new()));
+    generator.register_rule(Box::new(AsTextPhoneFormat::new()));
+
+    generator.register_postprocessor(Box::new(GlyphPostProcessingRule::new()));
+    generator.register_postprocessor(Box::new(PlusSevenPostProcessingRule::new()));
+
+    generator
+}
 
 /// Базовый тип для описания телефона.
 ///
@@ -39,6 +99,12 @@ trait PhoneFormatRule {
 
 struct AsDigitPhoneFormat;
 
+impl AsDigitPhoneFormat {
+    fn new() -> Self {
+        AsDigitPhoneFormat
+    }
+}
+
 impl PhoneFormatRule for AsDigitPhoneFormat {
     fn format_phone(&self, number: u32) -> Option<String> {
         Some(format!("{}", number))
@@ -46,6 +112,12 @@ impl PhoneFormatRule for AsDigitPhoneFormat {
 }
 
 struct AsTextPhoneFormat;
+
+impl AsTextPhoneFormat {
+    fn new() -> Self {
+        AsTextPhoneFormat
+    }
+}
 
 impl PhoneFormatRule for AsTextPhoneFormat {
     fn format_phone(&self, number: u32) -> Option<String> {
@@ -65,15 +137,18 @@ struct PhoneGenerator {
     postprocessors: Vec<Box<PostProcessingRule>>,
 }
 
+fn number_order_of_magnitude(n: u32) -> u32 {
+    f64::from(n).log10().ceil() as u32
+}
+
 impl PhoneGenerator {
-    fn new(country_format: &str, region_format: &str, number_format: &str,
-    ) -> Self {
+    fn new(country_format: &str, region_format: &str, number_format: &str) -> Self {
         let mut s = PhoneGenerator {
             country_formats: vec![],
             region_formats: vec![],
             number_formats: vec![],
             rules: vec![],
-            postprocessors: vec![]
+            postprocessors: vec![],
         };
         s.register_country_formats(vec![country_format]);
         s.register_region_formats(vec![region_format]);
@@ -81,13 +156,14 @@ impl PhoneGenerator {
         s
     }
 
-    fn generate_random(&self) -> Option<String> {
+    fn generate_random(&self) -> String {
         let mut rng = thread_rng();
         let country = 7;
         let region = rng.gen_range(900, 999);
         let number = rng.gen_range(1000000, 9999999);
         self.format((country, region, number))
             .map(|result| self.postprocess(result))
+            .unwrap()
     }
 
     fn postprocess(&self, phone: String) -> String {
@@ -107,19 +183,19 @@ impl PhoneGenerator {
         self.postprocessors.push(postprocessor);
     }
 
-    fn register_country_formats<'a>(&mut self, formats: impl IntoIterator<Item=&'a str>) {
+    fn register_country_formats<'a>(&mut self, formats: impl IntoIterator<Item = &'a str>) {
         for format in formats {
             self.country_formats.push(format.to_owned());
         }
     }
 
-    fn register_region_formats<'a>(&mut self, formats: impl IntoIterator<Item=&'a str>) {
+    fn register_region_formats<'a>(&mut self, formats: impl IntoIterator<Item = &'a str>) {
         for format in formats {
             self.region_formats.push(format.to_owned());
         }
     }
 
-    fn register_number_formats<'a>(&mut self, formats: impl IntoIterator<Item=&'a str>) {
+    fn register_number_formats<'a>(&mut self, formats: impl IntoIterator<Item = &'a str>) {
         for format in formats {
             self.number_formats.push(format.to_owned());
         }
@@ -133,16 +209,25 @@ impl PhoneGenerator {
             (phone.2, &self.number_formats),
         ];
         for (part, formats) in &phone_parts {
-            let formatted = &self.format_part(*part, formats).unwrap();
-            result.push_str(formatted);
+            if let Some(formatted) = &self.format_part(*part, formats, &self.rules) {
+                result.push_str(formatted);
+            } else {
+                eprintln!("Unable to print phone: {:?}", phone);
+                return None;
+            }
         }
         Some(result)
     }
 
-    fn format_part(&self, number: u32, formats: &Vec<String>) -> Option<String> {
+    fn format_part(
+        &self,
+        number: u32,
+        formats: &Vec<String>,
+        rules: &Vec<Box<PhoneFormatRule>>,
+    ) -> Option<String> {
         let mut rng = thread_rng();
         let chosen_format = formats.choose(&mut rng).unwrap();
-        let chosen_rule = self.rules.choose(&mut rng).unwrap();
+        let chosen_rule = rules.choose(&mut rng).unwrap();
         let mut result = String::with_capacity(chosen_format.len());
 
         let mut seen_number = 0u32;
@@ -183,6 +268,12 @@ trait PostProcessingRule {
 }
 
 struct PlusSevenPostProcessingRule;
+
+impl PlusSevenPostProcessingRule {
+    fn new() -> Self {
+        PlusSevenPostProcessingRule
+    }
+}
 
 impl PostProcessingRule for PlusSevenPostProcessingRule {
     fn transform(&self, phone: &str) -> Option<String> {
@@ -238,7 +329,7 @@ mod tests {
     #[test]
     fn generator_base_scenario() {
         let mut g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
-        g.register_rule(Box::new(AsDigitPhoneFormat));
+        g.register_rule(Box::new(AsDigitPhoneFormat::new()));
 
         assert_eq!(
             g.format((7, 999, 3056617)),
@@ -262,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_as_digit_phone_format() {
-        let rule = AsDigitPhoneFormat;
+        let rule = AsDigitPhoneFormat::new();
 
         assert_eq!(rule.format_phone(31), Some("31".to_string()));
         assert_eq!(rule.format_phone(4), Some("4".to_string()));
@@ -282,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_plus_seven_post_processing_rule() {
-        let rule = PlusSevenPostProcessingRule;
+        let rule = PlusSevenPostProcessingRule::new();
 
         assert_eq!(rule.transform("+7914"), Some("914".to_owned()));
         assert_eq!(rule.transform("+7 914"), Some("914".to_owned()));
@@ -296,18 +387,29 @@ mod tests {
     }
 
     #[test]
+    fn test_regression() {
+        let mut g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
+        let r = g.format_part(
+            8563222,
+            &vec!["#######".to_owned()],
+            &vec![Box::new(AsTextPhoneFormat)],
+        );
+        assert_eq!(r.is_some(), true);
+    }
+
+    #[test]
     fn test_generate_phone() {
         let mut g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
         g.register_country_formats(vec!["#"]);
         g.register_region_formats(vec!["###", " ### ", "-###-"]);
         g.register_number_formats(vec!["#######"]);
 
-        g.register_rule(Box::new(AsTextPhoneFormat));
-        g.register_rule(Box::new(AsDigitPhoneFormat));
+        g.register_rule(Box::new(AsTextPhoneFormat::new()));
+        g.register_rule(Box::new(AsDigitPhoneFormat::new()));
 
         g.register_postprocessor(Box::new(GlyphPostProcessingRule::new()));
-        g.register_postprocessor(Box::new(PlusSevenPostProcessingRule));
+        g.register_postprocessor(Box::new(PlusSevenPostProcessingRule::new()));
 
-        println!("{}", g.generate_random().unwrap());
+        println!("{}", g.generate_random());
     }
 }
