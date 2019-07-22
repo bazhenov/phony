@@ -3,7 +3,6 @@ extern crate clap;
 
 mod digits;
 mod numerate;
-mod odds;
 
 use clap::App;
 use digits::Digits;
@@ -11,8 +10,7 @@ use numerate::numerate;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
-use std::io::{stdin, Read};
-use std::process::exit;
+use std::io::{stdin, BufRead};
 
 fn main() {
     let app = App::new("phone-generate")
@@ -35,22 +33,14 @@ fn main() {
             println!("{}", generator.generate_random());
         }
     } else if stream_mode {
-        let mut line = String::new();
-
-        loop {
-            match stdin().read_to_string(&mut line) {
-                Ok(0) => break,
-
-                Ok(n) => {
-                    let line = line.trim();
-                    println!("{}", line);
-                }
-
-                Err(e) => {
-                    eprintln!("{}", e);
-                    exit(1);
-                }
+        let marker = "<PHONE>";
+        for line in stdin().lock().lines() {
+            let mut line = line.expect("Unable to read");
+            while let Some(offset) = line.find(marker) {
+                let span = offset..(offset + marker.len());
+                line.replace_range(span, &generator.generate_random());
             }
+            println!("{}", line);
         }
     }
 }
@@ -77,21 +67,6 @@ fn prepare_generator() -> PhoneGenerator {
 /// * код региона;
 /// * номер клиента.
 pub type Phone = (u16, u16, u32);
-
-fn phone_format(phone: Phone, format: &str) -> String {
-    let mut result = String::with_capacity(format.len());
-    let phone_string = format!("{}{}{}", phone.0, phone.1, phone.2);
-    let mut i = 0usize;
-    for c in format.chars() {
-        if c == '#' {
-            result.push(phone_string.chars().nth(i).unwrap());
-            i += 1;
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
 
 trait PhoneFormatRule {
     fn format_phone(&self, number: u32) -> Option<String>;
@@ -135,10 +110,6 @@ struct PhoneGenerator {
     number_formats: Vec<String>,
     rules: Vec<Box<PhoneFormatRule>>,
     postprocessors: Vec<Box<PostProcessingRule>>,
-}
-
-fn number_order_of_magnitude(n: u32) -> u32 {
-    f64::from(n).log10().ceil() as u32
 }
 
 impl PhoneGenerator {
@@ -319,14 +290,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_number_format() {
-        assert_eq!(
-            phone_format((7, 999, 3053315), "+# (###) ###-##-##"),
-            "+7 (999) 305-33-15"
-        );
-    }
-
-    #[test]
     fn generator_base_scenario() {
         let mut g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
         g.register_rule(Box::new(AsDigitPhoneFormat::new()));
@@ -388,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_regression() {
-        let mut g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
+        let g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
         let r = g.format_part(
             8563222,
             &vec!["#######".to_owned()],
