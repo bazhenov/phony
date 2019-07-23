@@ -9,8 +9,9 @@ use digits::Digits;
 use numerate::numerate;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
+use serde::Serialize;
 use std::collections::HashMap;
-use std::io::{stdin, BufRead};
+use std::io::{stdin, stdout, BufRead};
 
 fn main() {
     let app = App::new("phone-generate")
@@ -26,21 +27,17 @@ fn main() {
     let random = value_t!(matches, "random", u32).unwrap_or(0);
     let stream_mode = matches.is_present("stream");
 
-    let generator = prepare_generator();
+    let mut generator = prepare_generator();
 
     if random > 0 {
         for _ in 0..random {
             println!("{}", generator.generate_random());
         }
     } else if stream_mode {
-        let marker = "<PHONE>";
         for line in stdin().lock().lines() {
-            let mut line = line.expect("Unable to read");
-            while let Some(offset) = line.find(marker) {
-                let span = offset..(offset + marker.len());
-                line.replace_range(span, &generator.generate_random());
-            }
-            println!("{}", line);
+            let line = line.expect("Unable to read");
+            let sample = AugmentedSample::create(&line, &mut generator);
+            serde_json::to_writer(stdout(), &sample).expect("Unable to write json");
         }
     }
 }
@@ -110,6 +107,14 @@ struct PhoneGenerator {
     number_formats: Vec<String>,
     rules: Vec<Box<PhoneFormatRule>>,
     postprocessors: Vec<Box<PostProcessingRule>>,
+}
+
+impl Iterator for PhoneGenerator {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(self.generate_random())
+    }
 }
 
 impl PhoneGenerator {
@@ -285,6 +290,51 @@ impl PostProcessingRule for GlyphPostProcessingRule {
     }
 }
 
+#[derive(Serialize)]
+struct AugmentedSample {
+    message: String,
+    phone_indexes: Vec<(usize, usize)>,
+}
+
+impl AugmentedSample {
+    fn create<T: AsRef<str>>(
+        text: &str,
+        values: &mut impl Iterator<Item = T>,
+    ) -> Option<AugmentedSample> {
+        let mut message = String::with_capacity(text.len());
+        let mut offset_chars = 0;
+        let mut span = text;
+        let pattern = "<PHONE>";
+        let mut phone_indexes = vec![];
+
+        while let Some(match_offset) = span.find(pattern) {
+            offset_chars += span[..match_offset].chars().count();
+            message.push_str(&span[..match_offset]);
+            if let Some(n) = values.next() {
+                let replacement = n.as_ref();
+                let replacement_chars_length = replacement.chars().count();
+                phone_indexes.push((offset_chars, offset_chars + replacement_chars_length));
+                message.push_str(replacement);
+
+                offset_chars += replacement_chars_length;
+            } else {
+                return None;
+            }
+
+            span = &span[match_offset + pattern.len()..];
+        }
+
+        if span.len() > 0 {
+            message.push_str(span);
+        }
+
+        Some(AugmentedSample {
+            message,
+            phone_indexes,
+        })
+    }
+}
+
 mod tests {
 
     use super::*;
@@ -374,5 +424,21 @@ mod tests {
         g.register_postprocessor(Box::new(PlusSevenPostProcessingRule::new()));
 
         println!("{}", g.generate_random());
+    }
+
+    #[test]
+    fn test_create_augmented_sample() {
+        let text = "Первый: <PHONE>, второй: <PHONE>";
+        let list = vec!["1", "2"];
+        let sample = AugmentedSample::create(text, &mut list.iter()).unwrap();
+
+        assert_eq!(sample.message, "Первый: 1, второй: 2");
+        assert_eq!(sample.phone_indexes, vec![(8, 9), (19, 20)]);
+
+        let json = serde_json::to_string(&sample).unwrap();
+        assert_eq!(
+            json,
+            r#"{"message":"Первый: 1, второй: 2","phone_indexes":[[8,9],[19,20]]}"#
+        )
     }
 }
