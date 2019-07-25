@@ -7,11 +7,11 @@ impl Iterator for DigitIterator {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.magnitude <= 0 {
+        if self.magnitude == 0 {
             None
         } else {
             let result = self.number / self.magnitude;
-            self.number = self.number % self.magnitude;
+            self.number %= self.magnitude;
             self.magnitude /= 10;
             Some(result as u8)
         }

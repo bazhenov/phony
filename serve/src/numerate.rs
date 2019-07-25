@@ -50,7 +50,7 @@ const NUMBERS_100: [&str; 10] = [
 pub fn numerate(n: u32) -> String {
     let mut result = String::new();
     numerate_part(&mut result, n);
-    return result;
+    result
 }
 
 fn numerate_part(base: &mut String, n: u32) {

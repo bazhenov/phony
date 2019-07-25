@@ -19,25 +19,31 @@ fn main() {
         .version("1.0.0")
         .about("CLI utility for synthetic augmentation of phone numbers")
         .arg_from_usage(
-            "[random] -r, --random=[COUNT] 'Generate given number of random phone numbers'",
+            "[random] -r, --random 'Generate random phone numbers'",
         )
-        .arg_from_usage("[stream] -s, --stream 'Generating numbers for stream of input examples'");
+        .arg_from_usage("[stream] -s, --stream 'Generating numbers for a stream of input examples'")
+        .arg_from_usage("[count] -c, --count=[COUNT] 'Generate given number of examples'");
 
     let matches = app.get_matches();
-    let random = value_t!(matches, "random", u32).unwrap_or(0);
     let stream_mode = matches.is_present("stream");
+    let random_mode = matches.is_present("random");
+
+    let count = value_t!(matches, "count", u32).unwrap_or(1);
 
     let mut generator = prepare_generator();
 
-    if random > 0 {
-        for _ in 0..random {
+    if random_mode {
+        for _ in 0..count {
             println!("{}", generator.generate_random());
         }
     } else if stream_mode {
         for line in stdin().lock().lines() {
             let line = line.expect("Unable to read");
-            let sample = AugmentedSample::create(&line, &mut generator);
-            serde_json::to_writer(stdout(), &sample).expect("Unable to write json");
+            for _ in 0..count {
+                let sample = AugmentedSample::create(&line, &mut generator);
+                serde_json::to_writer(stdout(), &sample).expect("Unable to write json");
+                println!();
+            }
         }
     }
 }
@@ -136,7 +142,7 @@ impl PhoneGenerator {
         let mut rng = thread_rng();
         let country = 7;
         let region = rng.gen_range(900, 999);
-        let number = rng.gen_range(1000000, 9999999);
+        let number = rng.gen_range(1_000_000, 9_999_999);
         self.format((country, region, number))
             .map(|result| self.postprocess(result))
             .unwrap()
@@ -180,8 +186,8 @@ impl PhoneGenerator {
     fn format(&self, phone: Phone) -> Option<String> {
         let mut result = String::new();
         let phone_parts = [
-            (phone.0 as u32, &self.country_formats),
-            (phone.1 as u32, &self.region_formats),
+            (u32::from(phone.0), &self.country_formats),
+            (u32::from(phone.1), &self.region_formats),
             (phone.2, &self.number_formats),
         ];
         for (part, formats) in &phone_parts {
@@ -198,8 +204,8 @@ impl PhoneGenerator {
     fn format_part(
         &self,
         number: u32,
-        formats: &Vec<String>,
-        rules: &Vec<Box<PhoneFormatRule>>,
+        formats: &[String],
+        rules: &[Box<dyn PhoneFormatRule>],
     ) -> Option<String> {
         let mut rng = thread_rng();
         let chosen_format = formats.choose(&mut rng).unwrap();
@@ -217,7 +223,7 @@ impl PhoneGenerator {
             match c {
                 '#' => {
                     if let Some(digit) = digits.next() {
-                        seen_number += digit as u32;
+                        seen_number += u32::from(digit);
                         seen_number *= 10;
                     } else {
                         return None;
@@ -324,7 +330,7 @@ impl AugmentedSample {
             span = &span[match_offset + pattern.len()..];
         }
 
-        if span.len() > 0 {
+        if !span.is_empty() {
             message.push_str(span);
         }
 
@@ -402,10 +408,11 @@ mod tests {
     #[test]
     fn test_regression() {
         let g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
+        let rules: Vec<Box<dyn PhoneFormatRule>> = vec![Box::new(AsTextPhoneFormat)];
         let r = g.format_part(
             8563222,
             &vec!["#######".to_owned()],
-            &vec![Box::new(AsTextPhoneFormat)],
+            &rules,
         );
         assert_eq!(r.is_some(), true);
     }
