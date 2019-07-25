@@ -52,11 +52,27 @@ fn prepare_generator() -> PhoneGenerator {
     generator.register_region_formats(vec![" (###) ", "-###-"]);
     generator.register_number_formats(vec!["###-##-##", "### ## ##"]);
 
-    generator.register_rule(Box::new(AsDigitPhoneFormat::new()));
-    generator.register_rule(Box::new(AsTextPhoneFormat::new()));
+    generator.register_rule(10, Box::new(AsDigitPhoneFormat::new()));
+    generator.register_rule(1, Box::new(AsTextPhoneFormat::new()));
 
-    generator.register_postprocessor(Box::new(GlyphPostProcessingRule::new()));
-    generator.register_postprocessor(Box::new(PlusSevenPostProcessingRule::new()));
+    generator.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new()));
+    generator.register_postprocessor(1, Box::new(PlusSevenPostProcessingRule));
+    generator.register_postprocessor(1, Box::new(EightPostProcessingRule));
+
+    let mut map = HashMap::new();
+    map.insert('0', 'O');
+    map.insert('1', 'I');
+    generator.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new_from_mapping(map)));
+
+    let mut map = HashMap::new();
+    map.insert('0', 'o');
+    generator.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new_from_mapping(map)));
+
+    for c in &[
+        '.', '-', '/', '*', '#', '^', '(', ')', '[', ']', '_', '|', ' ',
+    ] {
+        generator.register_postprocessor(1, Box::new(InsertCharacterPostProcessing(*c, 0.5)));
+    }
 
     generator
 }
@@ -105,12 +121,20 @@ impl PhoneFormatRule for AsTextPhoneFormat {
     }
 }
 
+struct Odds<T>(T, u8);
+
+impl<T> Odds<T> {
+    fn weight(i: &Odds<T>) -> u8 {
+        i.1
+    }
+}
+
 struct PhoneGenerator {
     country_formats: Vec<String>,
     region_formats: Vec<String>,
     number_formats: Vec<String>,
-    rules: Vec<Box<PhoneFormatRule>>,
-    postprocessors: Vec<Box<PostProcessingRule>>,
+    rules: Vec<Odds<Box<PhoneFormatRule>>>,
+    postprocessors: Vec<Odds<Box<PostProcessingRule>>>,
 }
 
 impl Iterator for PhoneGenerator {
@@ -151,16 +175,20 @@ impl PhoneGenerator {
             return phone;
         }
         let mut rng = thread_rng();
-        let chosen = self.postprocessors.choose(&mut rng).unwrap();
+        let chosen = &self
+            .postprocessors
+            .choose_weighted(&mut rng, Odds::weight)
+            .unwrap()
+            .0;
         chosen.transform(&phone).unwrap_or(phone)
     }
 
-    fn register_rule(&mut self, rule: Box<PhoneFormatRule>) {
-        self.rules.push(rule);
+    fn register_rule(&mut self, odds: u8, rule: Box<PhoneFormatRule>) {
+        self.rules.push(Odds(rule, odds));
     }
 
-    fn register_postprocessor(&mut self, postprocessor: Box<PostProcessingRule>) {
-        self.postprocessors.push(postprocessor);
+    fn register_postprocessor(&mut self, odds: u8, postprocessor: Box<PostProcessingRule>) {
+        self.postprocessors.push(Odds(postprocessor, odds));
     }
 
     fn register_country_formats<'a>(&mut self, formats: impl IntoIterator<Item = &'a str>) {
@@ -203,11 +231,11 @@ impl PhoneGenerator {
         &self,
         number: u32,
         formats: &[String],
-        rules: &[Box<dyn PhoneFormatRule>],
+        rules: &[Odds<Box<dyn PhoneFormatRule>>],
     ) -> Option<String> {
         let mut rng = thread_rng();
         let chosen_format = formats.choose(&mut rng).unwrap();
-        let chosen_rule = rules.choose(&mut rng).unwrap();
+        let chosen_rule = &rules.choose_weighted(&mut rng, |i| i.1).unwrap().0;
         let mut result = String::with_capacity(chosen_format.len());
 
         let mut seen_number = 0u32;
@@ -249,21 +277,26 @@ trait PostProcessingRule {
 
 struct PlusSevenPostProcessingRule;
 
-impl PlusSevenPostProcessingRule {
-    fn new() -> Self {
-        PlusSevenPostProcessingRule
+impl PostProcessingRule for PlusSevenPostProcessingRule {
+    fn transform(&self, phone: &str) -> Option<String> {
+        if phone.starts_with("+7") {
+            return Some(phone[2..].to_string());
+        }
+        None
     }
 }
 
-impl PostProcessingRule for PlusSevenPostProcessingRule {
+struct EightPostProcessingRule;
+
+impl PostProcessingRule for EightPostProcessingRule {
     fn transform(&self, phone: &str) -> Option<String> {
-        if phone.starts_with("+7 ") {
-            Some(phone[3..].to_string())
-        } else if phone.starts_with("+7") {
-            Some(phone[2..].to_string())
-        } else {
-            None
+        if phone.starts_with("+7") {
+            let mut s = String::with_capacity(phone.len() - 1);
+            s.push('8');
+            s.push_str(&phone[2..]);
+            return Some(s);
         }
+        None
     }
 }
 
@@ -281,6 +314,10 @@ impl GlyphPostProcessingRule {
 
         GlyphPostProcessingRule { transformations }
     }
+
+    fn new_from_mapping(transformations: HashMap<char, char>) -> Self {
+        GlyphPostProcessingRule { transformations }
+    }
 }
 
 impl PostProcessingRule for GlyphPostProcessingRule {
@@ -291,6 +328,21 @@ impl PostProcessingRule for GlyphPostProcessingRule {
                 .map(|c| *self.transformations.get(&c).unwrap_or(&c))
                 .collect(),
         )
+    }
+}
+
+struct InsertCharacterPostProcessing(char, f32);
+
+impl PostProcessingRule for InsertCharacterPostProcessing {
+    fn transform(&self, phone: &str) -> Option<String> {
+        let mut result = phone.chars().collect::<Vec<_>>();
+        let mut rng = thread_rng();
+        let iterations = (self.1 * result.len() as f32) as u8;
+        for _ in 0..iterations {
+            let position = rng.gen_range(0, result.len());
+            result.insert(position, self.0);
+        }
+        Some(result.iter().collect())
     }
 }
 
@@ -347,7 +399,7 @@ mod tests {
     #[test]
     fn generator_base_scenario() {
         let mut g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
-        g.register_rule(Box::new(AsDigitPhoneFormat::new()));
+        g.register_rule(1, Box::new(AsDigitPhoneFormat::new()));
 
         assert_eq!(
             g.format((7, 999, 3056617)),
@@ -358,7 +410,7 @@ mod tests {
     #[test]
     fn generator_text_scenario() {
         let mut g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
-        g.register_rule(Box::new(AsTextPhoneFormat));
+        g.register_rule(1, Box::new(AsTextPhoneFormat));
 
         assert_eq!(
             g.format((7, 999, 3056617)),
@@ -391,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_plus_seven_post_processing_rule() {
-        let rule = PlusSevenPostProcessingRule::new();
+        let rule = PlusSevenPostProcessingRule;
 
         assert_eq!(rule.transform("+7914"), Some("914".to_owned()));
         assert_eq!(rule.transform("+7 914"), Some("914".to_owned()));
@@ -407,7 +459,7 @@ mod tests {
     #[test]
     fn test_regression() {
         let g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
-        let rules: Vec<Box<dyn PhoneFormatRule>> = vec![Box::new(AsTextPhoneFormat)];
+        let rules: Vec<Odds<Box<dyn PhoneFormatRule>>> = vec![Odds(Box::new(AsTextPhoneFormat), 1)];
         let r = g.format_part(8563222, &vec!["#######".to_owned()], &rules);
         assert_eq!(r.is_some(), true);
     }
@@ -419,11 +471,11 @@ mod tests {
         g.register_region_formats(vec!["###", " ### ", "-###-"]);
         g.register_number_formats(vec!["#######"]);
 
-        g.register_rule(Box::new(AsTextPhoneFormat::new()));
-        g.register_rule(Box::new(AsDigitPhoneFormat::new()));
+        g.register_rule(1, Box::new(AsTextPhoneFormat::new()));
+        g.register_rule(1, Box::new(AsDigitPhoneFormat::new()));
 
-        g.register_postprocessor(Box::new(GlyphPostProcessingRule::new()));
-        g.register_postprocessor(Box::new(PlusSevenPostProcessingRule::new()));
+        g.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new()));
+        g.register_postprocessor(1, Box::new(PlusSevenPostProcessingRule));
 
         println!("{}", g.generate_random());
     }
