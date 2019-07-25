@@ -62,15 +62,18 @@ fn prepare_generator() -> PhoneGenerator {
     let mut map = HashMap::new();
     map.insert('0', 'O');
     map.insert('1', 'I');
+    map.insert('3', 'З');
     generator.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new_from_mapping(map)));
 
     let mut map = HashMap::new();
     map.insert('0', 'o');
+    map.insert('3', 'з');
     generator.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new_from_mapping(map)));
 
-    for c in &[
+    let filling_chars = [
         '.', '-', '/', '*', '#', '^', '(', ')', '[', ']', '_', '|', ' ',
-    ] {
+    ];
+    for c in &filling_chars {
         generator.register_postprocessor(1, Box::new(InsertCharacterPostProcessing(*c, 0.5)));
     }
 

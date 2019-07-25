@@ -21,7 +21,10 @@ test:
 
 # Runs phone prepare augmentator
 private/input.jsonld:
-	pv private/sample.txt | $(docker-run) -i $(phony-container) /phony.py > private/input.jsonld
+	pv private/sample.txt | serve/target/release/augment -s -c 100 > private/input.jsonld
+
+clean:
+	rm -f private/input.jsonld
 
 # Runs ipython instance in a tensorflow notebook for experiments
 ipython:
@@ -34,9 +37,9 @@ learn: private/input.jsonld
 
 # Builds a docker container with phony
 build:
-	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1 .
+	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1 learn
 
 build-gpu:
-	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1-gpu .
+	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1-gpu learn
 
 .PHONY: build learn test ipython
