@@ -5,3 +5,4 @@ target
 /jupyter/*
 /.vscode
 *.h5
+*.so
