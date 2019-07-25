@@ -343,6 +343,7 @@ impl AugmentedSample {
 
 mod tests {
 
+    #![allow(unused)]
     use super::*;
 
     #[test]

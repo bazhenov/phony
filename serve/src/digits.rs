@@ -40,6 +40,7 @@ where
 
 mod tests {
 
+    #![allow(unused)]
     use super::*;
 
     #[test]
