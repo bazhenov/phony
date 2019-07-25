@@ -18,9 +18,7 @@ fn main() {
         .author("Denis Bazhenov <dotsid@gmail.com>")
         .version("1.0.0")
         .about("CLI utility for synthetic augmentation of phone numbers")
-        .arg_from_usage(
-            "[random] -r, --random 'Generate random phone numbers'",
-        )
+        .arg_from_usage("[random] -r, --random 'Generate random phone numbers'")
         .arg_from_usage("[stream] -s, --stream 'Generating numbers for a stream of input examples'")
         .arg_from_usage("[count] -c, --count=[COUNT] 'Generate given number of examples'");
 
@@ -410,11 +408,7 @@ mod tests {
     fn test_regression() {
         let g = PhoneGenerator::new("+#", " (###) ", "###-##-##");
         let rules: Vec<Box<dyn PhoneFormatRule>> = vec![Box::new(AsTextPhoneFormat)];
-        let r = g.format_part(
-            8563222,
-            &vec!["#######".to_owned()],
-            &rules,
-        );
+        let r = g.format_part(8563222, &vec!["#######".to_owned()], &rules);
         assert_eq!(r.is_some(), true);
     }
 
