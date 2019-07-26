@@ -275,8 +275,8 @@ impl Accumulator {
     }
 
     /// доля положительных вызовов по отношению к общему количеству
-    fn ratio(&self) -> f32 {
-        self.0 as f32 / self.1 as f32
+    fn ratio(self) -> f32 {
+        f32::from(self.0) / f32::from(self.1)
     }
 }
 
@@ -313,7 +313,7 @@ impl<'a> Iterator for CharNgrams<'a> {
     }
 }
 
-pub fn character_ngrams<'a>(text: &'a str, n: usize) -> CharNgrams<'a> {
+pub fn character_ngrams(text: &str, n: usize) -> CharNgrams<'_> {
     CharNgrams {
         text,
         position: (0, advance_character(text, 0, n)),

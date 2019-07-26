@@ -52,7 +52,7 @@ fn prepare_generator() -> PhoneGenerator {
     generator.register_region_formats(vec![" (###) ", "-###-"]);
     generator.register_number_formats(vec!["###-##-##", "### ## ##"]);
 
-    generator.register_rule(10, Box::new(AsDigitPhoneFormat::new()));
+    generator.register_rule(20, Box::new(AsDigitPhoneFormat::new()));
     generator.register_rule(1, Box::new(AsTextPhoneFormat::new()));
 
     generator.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new()));
@@ -63,12 +63,15 @@ fn prepare_generator() -> PhoneGenerator {
     map.insert('0', 'O');
     map.insert('1', 'I');
     map.insert('3', 'З');
-    generator.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new_from_mapping(map)));
+    generator.register_postprocessor(10, Box::new(GlyphPostProcessingRule::new_from_mapping(map)));
 
     let mut map = HashMap::new();
     map.insert('0', 'o');
     map.insert('3', 'з');
-    generator.register_postprocessor(1, Box::new(GlyphPostProcessingRule::new_from_mapping(map)));
+    generator.register_postprocessor(10, Box::new(GlyphPostProcessingRule::new_from_mapping(map)));
+
+    generator.register_postprocessor(10, Box::new(UppercasePostProcessing));
+    generator.register_postprocessor(100, Box::new(NopPostProcessing));
 
     let filling_chars = [
         '.', '-', '/', '*', '#', '^', '(', ')', '[', ']', '_', '|', ' ',
@@ -333,6 +336,23 @@ impl PostProcessingRule for GlyphPostProcessingRule {
                 .map(|c| *self.transformations.get(&c).unwrap_or(&c))
                 .collect(),
         )
+    }
+}
+
+/// Used as a NOP for configuring how much postprocessing is needed
+struct NopPostProcessing;
+
+impl PostProcessingRule for NopPostProcessing {
+    fn transform(&self, _phone: &str) -> Option<String> {
+        None
+    }
+}
+
+struct UppercasePostProcessing;
+
+impl PostProcessingRule for UppercasePostProcessing {
+    fn transform(&self, phone: &str) -> Option<String> {
+        Some(phone.to_uppercase())
     }
 }
 
