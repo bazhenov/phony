@@ -171,6 +171,8 @@ impl PhoneGenerator {
         self.format((country, region, number))
             .map(|result| self.postprocess(result))
             .unwrap()
+            .trim()
+            .to_string()
     }
 
     fn postprocess(&self, phone: String) -> String {
@@ -449,7 +451,6 @@ mod tests {
         let rule = PlusSevenPostProcessingRule;
 
         assert_eq!(rule.transform("+7914"), Some("914".to_owned()));
-        assert_eq!(rule.transform("+7 914"), Some("914".to_owned()));
     }
 
     #[test]

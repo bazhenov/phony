@@ -4,7 +4,7 @@ extern crate tensorflow;
 use clap::App;
 use std::env;
 use std::error::Error;
-use std::io::{stdin, Read};
+use std::io::{stdin, BufRead};
 use std::path::Path;
 use std::process::exit;
 use tensorflow::{
@@ -16,41 +16,29 @@ use encoding::all::WINDOWS_1251;
 use encoding::{EncoderTrap, Encoding};
 
 fn main() {
-    let app = App::new("phony-serve")
+    let matches = App::new("phony-serve")
         .author("Denis Bazhenov <dotsid@gmail.com>")
         .version("1.0.0")
         .about("CLI utility for phony classification problem")
-        .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'");
+        .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'")
+        .arg_from_usage("[only_mode] -o, --only 'Print only matched characters from phone'")
+        .get_matches();
 
     env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
-    let matches = app.get_matches();
     let model_path = matches.value_of("model").unwrap();
 
-    let mut line = String::new();
-
     if let Ok(runner) = TensorflowRunner::create_session(model_path) {
-        loop {
-            match stdin().read_to_string(&mut line) {
-                Ok(0) => break,
-
-                Ok(_) => {
-                    let line = line.trim();
-                    match runner.run_problem::<PhonyProblem>(&line) {
-                        Ok(mask) => {
-                            let mask_text = mask
-                                .iter()
-                                .map(|c| if *c { '^' } else { ' ' })
-                                .collect::<String>();
-                            println!("{}", line);
-                            println!("{}", mask_text);
-                        }
-                        Err(e) => {
-                            eprintln!("{}", e);
-                            exit(1);
-                        }
-                    }
+        for line in stdin().lock().lines() {
+            let line = line.expect("Unable to read line");
+            match runner.run_problem::<PhonyProblem>(line.trim()) {
+                Ok(mask) => {
+                    let mask_text = mask
+                        .iter()
+                        .map(|c| if *c { '^' } else { ' ' })
+                        .collect::<String>();
+                    println!("{}", line);
+                    println!("{}", mask_text);
                 }
-
                 Err(e) => {
                     eprintln!("{}", e);
                     exit(1);
