@@ -202,7 +202,6 @@ impl TensorflowProblem for PhonyProblem {
         if let Some((left_padding, padded_string, right_padding)) =
             Self::pad_string(example, Self::WINDOW)
         {
-            println!("-{}-", padded_string);
             Ok(PhonyProblem {
                 chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
                 left_padding,
