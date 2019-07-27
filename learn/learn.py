@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.python.keras.models import Model
-from tensorflow.python.keras.layers import Dense, Embedding, Conv1D, Flatten, Dropout, Input
+from tensorflow.python.keras.layers import Dense, Embedding, Conv1D, Flatten, Dropout, Input,\
+        LSTM, Bidirectional
 from tensorflow.keras import backend as K
 from tensorflow.keras import callbacks
 import numpy as np
@@ -61,10 +62,7 @@ def build_model():
   inputs = Input(shape=(64,), name="input")
   x = Embedding(256, 4, input_length=64, name="embedding")(inputs)
 
-  x = Conv1D(32, 13, padding='same', activation='relu', name="conv1d-1")(x)
-  x = Dropout(0.1, name="dropout-1")(x)
-  x = Conv1D(64, 13, padding='same', activation='relu', name="conv1d-2")(x)
-  x = Dropout(0.1, name="dropout-2")(x)
+  x = Bidirectional(LSTM(40, return_sequences=True), name="BiLSTM")(x)
 
   x = Dense(1, activation='sigmoid', name="final-dense")(x)
   prediction = Flatten(name='output')(x)
