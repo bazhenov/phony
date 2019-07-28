@@ -7,18 +7,7 @@ services:
     network_mode: bridge
     ports:
       - "1500:8888"
-    image: tensorflow/tensorflow:1.11.0-gpu-py3
+    image: phony-jupyter:dev
     command: ['jupyter', 'notebook', '--allow-root', '--NotebookApp.token=""', '--NotebookApp.notebook_dir=/work']
     volumes:
       - ./:/work
-  tensorboard:
-    environment:
-      NVIDIA_VISIBLE_DEVICES: 0
-    runtime: nvidia
-    network_mode: bridge
-    ports:
-      - "1501:6006"
-    image: tensorflow/tensorflow:1.11.0-gpu-py3
-    command: ['tensorboard', '--logdir=/model']
-    volumes:
-      - ./model:/model
