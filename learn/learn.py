@@ -1,9 +1,12 @@
 import tensorflow as tf
-from tensorflow.python.keras.models import Model
-from tensorflow.python.keras.layers import Dense, Embedding, Conv1D, Flatten, Dropout, Input,\
+from keras.models import Model
+from keras.layers import Dense, Embedding, Conv1D, Flatten, Dropout, Input,\
         LSTM, Bidirectional
 from tensorflow.keras import backend as K
 from tensorflow.keras import callbacks
+from keras_contrib.layers import CRF
+from keras_contrib.metrics import crf_viterbi_accuracy
+from keras_contrib.losses import crf_loss
 import numpy as np
 import json
 from optparse import OptionParser
@@ -55,8 +58,11 @@ def json2vec(sample, l=64, start=None):
   if padding > 0:
     x = x + ([0] * padding)
     y = np.pad(y, [(0, padding)], mode='constant')
+
+  y_onehot = np.zeros((l, 2))
+  y_onehot[np.arange(y.size), y.astype('int')] = 1
   
-  return (x, y)
+  return (x, y_onehot)
 
 def build_model():
   inputs = Input(shape=(64,), name="input")
@@ -64,11 +70,11 @@ def build_model():
 
   x = Bidirectional(LSTM(40, return_sequences=True), name="BiLSTM")(x)
 
-  x = Dense(1, activation='sigmoid', name="final-dense")(x)
-  prediction = Flatten(name='output')(x)
+  x = Dense(2, activation='sigmoid', name="final-dense")(x)
+  prediction = CRF(2)(x)
 
   model = Model(inputs=inputs, outputs = prediction)
-  model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['binary_accuracy'])
+  model.compile(loss=crf_loss, optimizer='adam', metrics=[crf_viterbi_accuracy])
   return model
 
 if __name__ == "__main__":
@@ -82,6 +88,10 @@ if __name__ == "__main__":
 
   inp = file(options.filename) if options.filename != None else stdin()
 
+  print("Building model...")
+  model = build_model()
+  model.summary()
+
   print("Reading samples...")
   X = []
   Y = []
@@ -90,15 +100,8 @@ if __name__ == "__main__":
     X.append(x)
     Y.append(y)
 
-  model = build_model()
-  model.summary()
-
-  tensorboard_callback = callbacks.TensorBoard(log_dir='./tensorboard', histogram_freq=0, batch_size=32,
-          write_graph=True, write_grads=False, write_images=False, embeddings_freq=0,
-          embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None, update_freq='epoch')
-
   model.fit(np.array(X), np.array(Y), epochs=options.epochs, batch_size=64, validation_split=options.validation,
-          shuffle=True, callbacks=[tensorboard_callback])
+          shuffle=True)
 
   print("Saving mode to: " + options.model)
   tf.contrib.saved_model.save_keras_model(model, options.model)
