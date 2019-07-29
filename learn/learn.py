@@ -1,7 +1,7 @@
 import tensorflow as tf
-from keras.models import Model
-from keras.layers import Dense, Embedding, Conv1D, Flatten, Dropout, Input,\
-        LSTM, Bidirectional
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, Embedding, Conv1D, Flatten, Dropout, Input,\
+        LSTM, Bidirectional, Concatenate
 from tensorflow.keras import backend as K
 from tensorflow.keras import callbacks
 from keras_contrib.layers import CRF
@@ -66,15 +66,23 @@ def json2vec(sample, l=64, start=None):
 
 def build_model():
   inputs = Input(shape=(64,), name="input")
-  x = Embedding(256, 4, input_length=64, name="embedding")(inputs)
 
-  x = Bidirectional(LSTM(40, return_sequences=True), name="BiLSTM")(x)
+  emb = x = Embedding(256, 4, input_length=64, name="embedding")(inputs)
+
+  x = Conv1D(32, 13, padding='same', activation='relu', name="conv1d-1")(x)
+  x = Dropout(0.1, name="dropout-1")(x)
+  aux = Concatenate(name="aux")([x, emb])
+  x = Conv1D(64, 13, padding='same', activation='relu', name="conv1d-2")(aux)
+  x = Dropout(0.1, name="dropout-2")(x)
 
   x = Dense(2, activation='sigmoid', name="final-dense")(x)
+  #prediction = Flatten(name = 'output')(x)
   prediction = CRF(2)(x)
+  #prediction = x
 
   model = Model(inputs=inputs, outputs = prediction)
   model.compile(loss=crf_loss, optimizer='adam', metrics=[crf_viterbi_accuracy])
+  #model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
   return model
 
 if __name__ == "__main__":
@@ -104,4 +112,6 @@ if __name__ == "__main__":
           shuffle=True)
 
   print("Saving mode to: " + options.model)
+  #tf.keras.experimental.export_saved_model(model, options.model + "/exp")
+
   tf.contrib.saved_model.save_keras_model(model, options.model)
