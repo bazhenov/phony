@@ -5,6 +5,7 @@ use clap::App;
 use std::env;
 use std::error::Error;
 use std::io::{stdin, BufRead};
+use std::ops::Range;
 use std::path::Path;
 use std::process::exit;
 use tensorflow::{
@@ -369,14 +370,14 @@ mod tests {
 
         let spans = v.iter().spans(|i| *i > 0).collect::<Vec<_>>();
         assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0], Span(2, 3));
-        assert_eq!(spans[1], Span(5, 8));
+        assert_eq!(spans[0], 2..3);
+        assert_eq!(spans[1], 5..8);
 
         let spans = v.iter().spans(|i| *i == 0).collect::<Vec<_>>();
         assert_eq!(spans.len(), 3);
-        assert_eq!(spans[0], Span(0, 2));
-        assert_eq!(spans[1], Span(3, 5));
-        assert_eq!(spans[2], Span(8, 9));
+        assert_eq!(spans[0], 0..2);
+        assert_eq!(spans[1], 3..5);
+        assert_eq!(spans[2], 8..9);
     }
 }
 
@@ -385,9 +386,6 @@ struct Spans<'a, I: Iterator, F> {
     position: usize,
     f: F,
 }
-
-#[derive(PartialEq, Debug)]
-struct Span(usize, usize);
 
 trait SpanExtension: Iterator + Sized {
     fn spans<'a, F>(&'a mut self, f: F) -> Spans<'a, Self, F>
@@ -409,24 +407,24 @@ where
     I: Iterator,
     F: Fn(I::Item) -> bool,
 {
-    type Item = Span;
+    type Item = Range<usize>;
 
-    fn next(&mut self) -> Option<Span> {
+    fn next(&mut self) -> Option<Self::Item> {
         loop {
             self.position += 1;
             match self.iterator.next().map(&self.f) {
                 Some(true) => break,
                 None => return None,
-                Some(false) => {},
+                Some(false) => {}
             }
         }
         let from = self.position - 1;
         loop {
             self.position += 1;
             match self.iterator.next().map(&self.f) {
-                Some(false) => return Some(Span(from, self.position - 1)),
-                None => return Some(Span(from, self.position - 1)),
-                Some(true) => {},
+                Some(false) => return Some(from..self.position - 1),
+                None => return Some(from..self.position - 1),
+                Some(true) => {}
             }
         }
     }
