@@ -27,18 +27,31 @@ fn main() {
 
     env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
     let model_path = matches.value_of("model").unwrap();
+    let only_mode = matches.is_present("only_mode");
 
     if let Ok(runner) = TensorflowRunner::create_session(model_path) {
         for line in stdin().lock().lines() {
             let line = line.expect("Unable to read line");
-            match runner.run_problem::<PhonyProblem>(line.trim()) {
+            let line = line.trim();
+            match runner.run_problem::<PhonyProblem>(line) {
                 Ok(mask) => {
-                    let mask_text = mask
-                        .iter()
-                        .map(|c| if *c { '^' } else { ' ' })
-                        .collect::<String>();
-                    println!("{}", line);
-                    println!("{}", mask_text);
+                    if only_mode {
+                        for span in mask.iter().spans(|c| *c) {
+                            let phone = line
+                                .chars()
+                                .skip(span.start)
+                                .take(span.end - span.start)
+                                .collect::<String>();
+                            println!("{}", phone);
+                        }
+                    } else {
+                        let mask_text = mask
+                            .iter()
+                            .map(|c| if *c { '^' } else { ' ' })
+                            .collect::<String>();
+                        println!("{}", line);
+                        println!("{}", mask_text);
+                    }
                 }
                 Err(e) => {
                     eprintln!("{}", e);
