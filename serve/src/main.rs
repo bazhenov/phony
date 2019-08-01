@@ -362,4 +362,72 @@ mod tests {
             Some((1usize, String::from(" 123 "), 1usize))
         );
     }
+
+    #[test]
+    fn groups() {
+        let v = vec![0, 0, 1, 0, 0, 1, 1, 1, 0];
+
+        let spans = v.iter().spans(|i| *i > 0).collect::<Vec<_>>();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0], Span(2, 3));
+        assert_eq!(spans[1], Span(5, 8));
+
+        let spans = v.iter().spans(|i| *i == 0).collect::<Vec<_>>();
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0], Span(0, 2));
+        assert_eq!(spans[1], Span(3, 5));
+        assert_eq!(spans[2], Span(8, 9));
+    }
+}
+
+struct Spans<'a, I: Iterator, F> {
+    iterator: &'a mut I,
+    position: usize,
+    f: F,
+}
+
+#[derive(PartialEq, Debug)]
+struct Span(usize, usize);
+
+trait SpanExtension: Iterator + Sized {
+    fn spans<'a, F>(&'a mut self, f: F) -> Spans<'a, Self, F>
+    where
+        F: Fn(Self::Item) -> bool,
+    {
+        Spans {
+            iterator: self,
+            position: 0,
+            f: f,
+        }
+    }
+}
+
+impl<T: Iterator> SpanExtension for T {}
+
+impl<I, F> Iterator for Spans<'_, I, F>
+where
+    I: Iterator,
+    F: Fn(I::Item) -> bool,
+{
+    type Item = Span;
+
+    fn next(&mut self) -> Option<Span> {
+        loop {
+            self.position += 1;
+            match self.iterator.next().map(&self.f) {
+                Some(true) => break,
+                None => return None,
+                Some(false) => {},
+            }
+        }
+        let from = self.position - 1;
+        loop {
+            self.position += 1;
+            match self.iterator.next().map(&self.f) {
+                Some(false) => return Some(Span(from, self.position - 1)),
+                None => return Some(Span(from, self.position - 1)),
+                Some(true) => {},
+            }
+        }
+    }
 }
