@@ -381,21 +381,21 @@ mod tests {
     }
 }
 
-struct Spans<'a, I: Iterator, F> {
+struct Spans<'a, I, F> {
     iterator: &'a mut I,
     position: usize,
-    f: F,
+    predicate: F,
 }
 
 trait SpanExtension: Iterator + Sized {
-    fn spans<'a, F>(&'a mut self, f: F) -> Spans<'a, Self, F>
+    fn spans<F>(&mut self, f: F) -> Spans<'_, Self, F>
     where
         F: Fn(Self::Item) -> bool,
     {
         Spans {
             iterator: self,
             position: 0,
-            f: f,
+            predicate: f,
         }
     }
 }
@@ -412,7 +412,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             self.position += 1;
-            match self.iterator.next().map(&self.f) {
+            match self.iterator.next().map(&self.predicate) {
                 Some(true) => break,
                 None => return None,
                 Some(false) => {}
@@ -421,7 +421,7 @@ where
         let from = self.position - 1;
         loop {
             self.position += 1;
-            match self.iterator.next().map(&self.f) {
+            match self.iterator.next().map(&self.predicate) {
                 Some(false) => return Some(from..self.position - 1),
                 None => return Some(from..self.position - 1),
                 Some(true) => {}
