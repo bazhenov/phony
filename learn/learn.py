@@ -81,6 +81,10 @@ if __name__ == "__main__":
   (options, args) = parser.parse_args()
 
   inp = file(options.filename) if options.filename != None else stdin()
+  
+  print("Building model...")
+  model = build_model()
+  model.summary()
 
   print("Reading samples...")
   X = []
@@ -90,8 +94,6 @@ if __name__ == "__main__":
     X.append(x)
     Y.append(y)
 
-  model = build_model()
-  model.summary()
 
   tensorboard_callback = callbacks.TensorBoard(log_dir='./tensorboard', histogram_freq=0, batch_size=32,
           write_graph=True, write_grads=False, write_images=False, embeddings_freq=0,
