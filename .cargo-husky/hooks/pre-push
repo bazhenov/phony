@@ -1,0 +1,11 @@
+#!/bin/sh
+
+set -e
+
+cd serve
+
+echo "cargo test --all"
+cargo test --all
+
+echo "cargo clippy"
+cargo clippy

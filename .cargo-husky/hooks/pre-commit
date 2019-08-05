@@ -6,9 +6,3 @@ cd serve
 
 echo "cargo fmt -- --check"
 cargo fmt -- --check
-
-echo "cargo test --all"
-cargo test --all
-
-echo "cargo clippy"
-cargo clippy
