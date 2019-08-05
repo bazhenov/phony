@@ -3,6 +3,7 @@ extern crate tensorflow;
 
 use clap::App;
 use std::env;
+
 use std::error::Error;
 use std::io::{stdin, BufRead};
 use std::ops::Range;
