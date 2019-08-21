@@ -4,6 +4,7 @@ extern crate tensorflow;
 use clap::App;
 use std::env;
 
+use ndarray::{Array, Array2, ArrayBase, ShapeBuilder};
 use std::error::Error;
 use std::io::{stdin, BufRead};
 use std::ops::Range;
@@ -86,17 +87,39 @@ impl TensorflowRunner {
 
         let (input_op, output_op) = problem.retrieve_input_output_operation(&self.graph)?;
 
-        let outputs = inputs
-            .iter()
-            .map(|t| {
-                problem
-                    .feed(&self.session, &input_op, &output_op, t)
-                    .unwrap()
-            })
-            .collect::<Vec<_>>();
+        for row in inputs.genrows() {
+            let tensor = tensor_from_ndarray(&row);
+            let answer = problem.feed(&self.session, &input_op, &output_op, &tensor);
+        }
 
         Ok(problem.output_from_tensors(&example, outputs))
     }
+}
+
+fn tensor_from_ndarray<D, T, S>(input: &ArrayBase<D, S>) -> Tensor<T>
+where
+    T: TensorType,
+    D: ndarray::Data<Elem = T>,
+    S: ndarray::Dimension,
+{
+    let shape = input.shape().iter().map(|i| *i as u64).collect::<Vec<_>>();
+    if let Some(slice) = input.as_slice() {
+        Tensor::new(&shape[..])
+            .with_values(slice)
+            .expect("Can't build tensor")
+    } else {
+        panic!("Can't get slice from ndarray");
+    }
+}
+
+fn ndarray_from_tensor<T: TensorType>(input: &Tensor<T>) -> Array2<T> {
+    if input.dims().len() != 2 {
+        panic!("Should be 2-dimensional ");
+    }
+    let vector = Array::from_iter(input.iter().map(|i| *i));
+    let [rows, columns] = input.dims();
+    let dims = (*rows as usize, *columns as usize);
+    vector.into_shape(dims).expect("Unable to reshape")
 }
 
 /// Микрофреймворк для решения задач при помощи библиотеки Tensorflow.
@@ -126,7 +149,7 @@ pub trait TensorflowProblem {
     fn tensors_from_example(
         &self,
         example: &Self::Input,
-    ) -> Result<Vec<Tensor<Self::TensorInputType>>, Box<dyn Error>>;
+    ) -> Result<Array2<Self::TensorInputType>, Box<dyn Error>>;
 
     fn retrieve_input_output_operation(
         &self,
@@ -141,7 +164,7 @@ pub trait TensorflowProblem {
     fn output_from_tensors(
         &self,
         example: &Self::Input,
-        tensors: Vec<Tensor<Self::TensorOutputType>>,
+        tensors: Array2<Self::TensorOutputType>,
     ) -> Self::Output;
 
     fn fetch_tensor(
@@ -244,26 +267,31 @@ impl TensorflowProblem for PhonyProblem {
     fn tensors_from_example(
         &self,
         _e: &Self::Input,
-    ) -> Result<Vec<Tensor<Self::TensorInputType>>, Box<dyn Error>> {
-        Ok(self
-            .chars
-            .windows(Self::WINDOW)
-            .map(PhonyProblem::create_tensor)
-            .collect())
+    ) -> Result<Array2<Self::TensorInputType>, Box<dyn Error>> {
+        let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
+
+        let result = Array2::zeros((ngrams.len(), Self::WINDOW).f());
+
+        for (i, ngram) in ngrams.iter().enumerate() {
+            for (j, c) in ngram.iter().enumerate() {
+                result[[i, j]] = f32::from(*c);
+            }
+        }
+
+        Ok(result)
     }
 
     fn output_from_tensors(
         &self,
         _example: &Self::Input,
-        tensors: Vec<Tensor<Self::TensorOutputType>>,
+        tensors: Array2<Self::TensorOutputType>,
     ) -> Vec<bool> {
         let mut mask = vec![Accumulator(0, 0); self.chars.len()];
         let character_length = self.chars.len() - self.left_padding - self.right_padding;
 
-        let length = tensors[0].dims()[1] as usize;
-        for (offset, tensor) in tensors.iter().enumerate() {
-            for i in 0..length {
-                mask[i + offset].register(tensor[i] > 0.5);
+        for i in 0..tensors.rows() {
+            for j in 0..tensors.cols() {
+                mask[i + j].register(tensors[[i, j]] > 0.5);
             }
         }
         mask.iter()
