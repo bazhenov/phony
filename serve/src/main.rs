@@ -113,6 +113,9 @@ pub trait TensorflowProblem {
     /// Тип тензора-выхода (`u32`/`f32` и т.д.)
     type TensorOutputType: TensorType;
 
+    const INPUT_OPERATION: &'static str;
+    const OUTPUT_OPERATION: &'static str;
+
     type Input: ?Sized;
     type Output;
 
@@ -128,7 +131,12 @@ pub trait TensorflowProblem {
     fn retrieve_input_output_operation(
         &self,
         graph: &Graph,
-    ) -> Result<(Operation, Operation), Status>;
+    ) -> Result<(Operation, Operation), Status> {
+        let input = graph.operation_by_name_required(Self::INPUT_OPERATION)?;
+        let output = graph.operation_by_name_required(Self::OUTPUT_OPERATION)?;
+
+        Ok((input, output))
+    }
 
     fn output_from_tensors(
         &self,
@@ -212,6 +220,8 @@ impl TensorflowProblem for PhonyProblem {
     type TensorOutputType = f32;
     type Input = str;
     type Output = Vec<bool>;
+    const INPUT_OPERATION: &'static str = "input";
+    const OUTPUT_OPERATION: &'static str = "output/Reshape";
 
     fn new_context(example: &Self::Input) -> Result<Self, Box<dyn Error>> {
         if let Some((left_padding, padded_string, right_padding)) =
@@ -240,16 +250,6 @@ impl TensorflowProblem for PhonyProblem {
             .windows(Self::WINDOW)
             .map(PhonyProblem::create_tensor)
             .collect())
-    }
-
-    fn retrieve_input_output_operation(
-        &self,
-        graph: &Graph,
-    ) -> Result<(Operation, Operation), Status> {
-        let input = graph.operation_by_name_required("input")?;
-        let output = graph.operation_by_name_required("output/Reshape")?;
-
-        Ok((input, output))
     }
 
     fn output_from_tensors(
