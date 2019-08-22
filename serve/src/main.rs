@@ -83,16 +83,13 @@ impl TensorflowRunner {
         example: &P::Input,
     ) -> Result<P::Output, Box<dyn Error>> {
         let problem = P::new_context(&example)?;
-        let inputs = problem.tensors_from_example(&example)?;
-
         let (input_op, output_op) = problem.retrieve_input_output_operation(&self.graph)?;
 
-        for row in inputs.genrows() {
-            let tensor = tensor_from_ndarray(&row);
-            let answer = problem.feed(&self.session, &input_op, &output_op, &tensor);
-        }
+        let inputs = problem.tensors_from_example(&example)?;
 
-        Ok(problem.output_from_tensors(&example, outputs))
+        let tensor = tensor_from_ndarray(&inputs);
+        let output = problem.feed(&self.session, &input_op, &output_op, &tensor)?;
+        Ok(problem.output_from_tensors(&example, ndarray_from_tensor(&output)))
     }
 }
 
@@ -112,13 +109,13 @@ where
     }
 }
 
-fn ndarray_from_tensor<T: TensorType>(input: &Tensor<T>) -> Array2<T> {
-    if input.dims().len() != 2 {
-        panic!("Should be 2-dimensional ");
-    }
+fn ndarray_from_tensor<T: TensorType + Copy>(input: &Tensor<T>) -> Array2<T> {
     let vector = Array::from_iter(input.iter().map(|i| *i));
-    let [rows, columns] = input.dims();
-    let dims = (*rows as usize, *columns as usize);
+    let [rows, columns] = match *input.dims() {
+        [a, b] => [a, b],
+        _ => panic!("Should be 2-dimensional "),
+    };
+    let dims = (rows as usize, columns as usize);
     vector.into_shape(dims).expect("Unable to reshape")
 }
 
@@ -131,10 +128,10 @@ fn ndarray_from_tensor<T: TensorType>(input: &Tensor<T>) -> Array2<T> {
 /// * как из примера получить тензор
 pub trait TensorflowProblem {
     /// Тип тензора-входа (`u32`/`f32` и т.д.)
-    type TensorInputType: TensorType;
+    type TensorInputType: TensorType + Copy;
 
     /// Тип тензора-выхода (`u32`/`f32` и т.д.)
-    type TensorOutputType: TensorType;
+    type TensorOutputType: TensorType + Copy;
 
     const INPUT_OPERATION: &'static str;
     const OUTPUT_OPERATION: &'static str;
@@ -201,18 +198,6 @@ struct PhonyProblem {
 impl PhonyProblem {
     const WINDOW: usize = 16;
 
-    fn create_tensor<I, O>(slice: &[I]) -> Tensor<O>
-    where
-        O: TensorType + From<I>,
-        I: Copy,
-    {
-        let mut tensor: Tensor<O> = Tensor::new(&[1, slice.len() as u64]);
-        for i in 0..slice.len() {
-            tensor[i] = slice[i].into();
-        }
-        tensor
-    }
-
     fn pad_string(string: &str, desired_length: usize) -> Option<(usize, String, usize)> {
         let char_length = string.chars().count();
         if char_length >= desired_length {
@@ -270,7 +255,7 @@ impl TensorflowProblem for PhonyProblem {
     ) -> Result<Array2<Self::TensorInputType>, Box<dyn Error>> {
         let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
 
-        let result = Array2::zeros((ngrams.len(), Self::WINDOW).f());
+        let mut result = Array2::zeros((ngrams.len(), Self::WINDOW).f());
 
         for (i, ngram) in ngrams.iter().enumerate() {
             for (j, c) in ngram.iter().enumerate() {
@@ -362,10 +347,60 @@ pub fn character_ngrams(text: &str, n: usize) -> CharNgrams<'_> {
     }
 }
 
+struct Spans<'a, I, F> {
+    iterator: &'a mut I,
+    position: usize,
+    predicate: F,
+}
+
+trait SpanExtension: Iterator + Sized {
+    fn spans<F>(&mut self, f: F) -> Spans<'_, Self, F>
+    where
+        F: Fn(Self::Item) -> bool,
+    {
+        Spans {
+            iterator: self,
+            position: 0,
+            predicate: f,
+        }
+    }
+}
+
+impl<T: Iterator> SpanExtension for T {}
+
+impl<I, F> Iterator for Spans<'_, I, F>
+where
+    I: Iterator,
+    F: Fn(I::Item) -> bool,
+{
+    type Item = Range<usize>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            self.position += 1;
+            match self.iterator.next().map(&self.predicate) {
+                Some(true) => break,
+                None => return None,
+                Some(false) => {}
+            }
+        }
+        let from = self.position - 1;
+        loop {
+            self.position += 1;
+            match self.iterator.next().map(&self.predicate) {
+                Some(false) => return Some(from..self.position - 1),
+                None => return Some(from..self.position - 1),
+                Some(true) => {}
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
+    use ndarray::arr2;
 
     #[test]
     fn text_segmentate() {
@@ -421,53 +456,22 @@ mod tests {
         assert_eq!(spans[1], 3..5);
         assert_eq!(spans[2], 8..9);
     }
-}
 
-struct Spans<'a, I, F> {
-    iterator: &'a mut I,
-    position: usize,
-    predicate: F,
-}
-
-trait SpanExtension: Iterator + Sized {
-    fn spans<F>(&mut self, f: F) -> Spans<'_, Self, F>
-    where
-        F: Fn(Self::Item) -> bool,
-    {
-        Spans {
-            iterator: self,
-            position: 0,
-            predicate: f,
-        }
+    #[test]
+    fn create_ndarray_from_tensor() {
+        let tensor = Tensor::new(&[2, 2]).with_values(&[1, 2, 3, 4]);
+        let ndarray = tensor.as_ref().map(ndarray_from_tensor).unwrap();
+        assert_eq!(ndarray.dim(), (2usize, 2usize));
+        // Array values are expected in row-major format
+        assert_eq!(ndarray.as_slice(), Some(&[1, 2, 3, 4][..]));
     }
-}
 
-impl<T: Iterator> SpanExtension for T {}
-
-impl<I, F> Iterator for Spans<'_, I, F>
-where
-    I: Iterator,
-    F: Fn(I::Item) -> bool,
-{
-    type Item = Range<usize>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            self.position += 1;
-            match self.iterator.next().map(&self.predicate) {
-                Some(true) => break,
-                None => return None,
-                Some(false) => {}
-            }
-        }
-        let from = self.position - 1;
-        loop {
-            self.position += 1;
-            match self.iterator.next().map(&self.predicate) {
-                Some(false) => return Some(from..self.position - 1),
-                None => return Some(from..self.position - 1),
-                Some(true) => {}
-            }
-        }
+    #[test]
+    fn create_tensor_from_ndarray() {
+        let ndarray = arr2(&[[1, 2], [3,4]]);
+        let tensor = tensor_from_ndarray(&ndarray);
+        assert_eq!(tensor.dims(), &[2, 2]);
+        let content = tensor.iter().cloned().collect::<Vec<_>>();
+        assert_eq!(content, vec![1, 2, 3 ,4]);
     }
 }
