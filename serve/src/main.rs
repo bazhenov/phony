@@ -4,7 +4,7 @@ extern crate tensorflow;
 use clap::App;
 use std::env;
 
-use ndarray::{Array, Array2, ArrayBase};
+use ndarray::{Array, Array2};
 use std::error::Error;
 use std::io::{stdin, BufRead};
 use std::ops::Range;
@@ -86,33 +86,29 @@ impl TensorflowRunner {
         let (input_op, output_op) = problem.retrieve_input_output_operation(&self.graph)?;
 
         let inputs = problem.tensors_from_example(&example);
-        if !inputs.is_standard_layout() {
-            panic!("ndarray should be in standard layout");
-        }
+        assert!(inputs.is_standard_layout(), "ndarray should be in standard (row-major) layout. Make sure you doesn't use ShapeBuilder::f() method when creating tensors");
 
-        let tensor = tensor_from_ndarray(&inputs);
-        let output = problem.feed(&self.session, &input_op, &output_op, &tensor)?;
-        Ok(problem.output_from_tensors(&example, ndarray_from_tensor(&output)))
+        let tensor = tensor_from_ndarray(inputs);
+        problem
+            .feed(&self.session, &input_op, &output_op, &tensor)
+            .map(ndarray_from_tensor)
+            .map(|output| problem.output_from_tensors(&example, output))
     }
 }
 
-fn tensor_from_ndarray<D, T, S>(input: &ArrayBase<D, S>) -> Tensor<T>
+fn tensor_from_ndarray<T, S>(input: Array<T, S>) -> Tensor<T>
 where
     T: TensorType,
-    D: ndarray::Data<Elem = T>,
     S: ndarray::Dimension,
 {
     let shape = input.shape().iter().map(|i| *i as u64).collect::<Vec<_>>();
-    if let Some(slice) = input.as_slice() {
-        Tensor::new(&shape[..])
-            .with_values(slice)
-            .expect("Can't build tensor")
-    } else {
-        panic!("Can't get slice from ndarray");
-    }
+    let slice = input.as_slice().expect("Can't get slice from ndarray");
+    Tensor::new(&shape[..])
+        .with_values(slice)
+        .expect("Can't build tensor")
 }
 
-fn ndarray_from_tensor<T: TensorType + Copy>(input: &Tensor<T>) -> Array2<T> {
+fn ndarray_from_tensor<T: TensorType + Copy>(input: Tensor<T>) -> Array2<T> {
     let vector = Array::from_iter(input.iter().cloned());
     let [rows, columns] = match *input.dims() {
         [a, b] => [a, b],
@@ -492,7 +488,7 @@ mod tests {
     #[test]
     fn create_ndarray_from_tensor() {
         let tensor = Tensor::new(&[2, 2]).with_values(&[1, 2, 3, 4]);
-        let ndarray = tensor.as_ref().map(ndarray_from_tensor).unwrap();
+        let ndarray = tensor.map(ndarray_from_tensor).unwrap();
         assert_eq!(ndarray.dim(), (2usize, 2usize));
         // Array values are expected in row-major format
         assert_eq!(ndarray.as_slice(), Some(&[1, 2, 3, 4][..]));
@@ -500,8 +496,7 @@ mod tests {
 
     #[test]
     fn create_tensor_from_ndarray() {
-        let ndarray = arr2(&[[1, 2], [3, 4]]);
-        let tensor = tensor_from_ndarray(&ndarray);
+        let tensor = tensor_from_ndarray(arr2(&[[1, 2], [3, 4]]));
         assert_eq!(tensor.dims(), &[2, 2]);
         let content = tensor.iter().cloned().collect::<Vec<_>>();
         assert_eq!(content, vec![1, 2, 3, 4]);
