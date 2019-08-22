@@ -47,34 +47,33 @@ fn inference(matches: &ArgMatches, stdin: &Stdin) {
     let model_path = matches.value_of("model").unwrap();
     let only_mode = matches.is_present("only_mode");
 
-    if let Ok(runner) = TensorflowRunner::create_session(model_path) {
-        for line in stdin.lock().lines() {
-            let line = line.expect("Unable to read line");
-            let line = line.trim();
-            match runner.run_problem::<PhonyProblem>(line) {
-                Ok(mask) => {
-                    if only_mode {
-                        for span in mask.iter().spans(|c| *c) {
-                            let phone = line
-                                .chars()
-                                .skip(span.start)
-                                .take(span.end - span.start)
-                                .collect::<String>();
-                            println!("{}", phone);
-                        }
-                    } else {
-                        let mask_text = mask
-                            .iter()
-                            .map(|c| if *c { '^' } else { ' ' })
+    let runner = TensorflowRunner::create_session(model_path).expect("Unable to create session");
+    for line in stdin.lock().lines() {
+        let line = line.expect("Unable to read line");
+        let line = line.trim();
+        match runner.run_problem::<PhonyProblem>(line) {
+            Ok(mask) => {
+                if only_mode {
+                    for span in mask.iter().spans(|c| *c) {
+                        let phone = line
+                            .chars()
+                            .skip(span.start)
+                            .take(span.end - span.start)
                             .collect::<String>();
-                        println!("{}", line);
-                        println!("{}", mask_text);
+                        println!("{}", phone);
                     }
+                } else {
+                    let mask_text = mask
+                        .iter()
+                        .map(|c| if *c { '^' } else { ' ' })
+                        .collect::<String>();
+                    println!("{}", line);
+                    println!("{}", mask_text);
                 }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    exit(1);
-                }
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                exit(1);
             }
         }
     }
