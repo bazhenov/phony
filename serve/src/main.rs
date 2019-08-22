@@ -86,6 +86,9 @@ impl TensorflowRunner {
         let (input_op, output_op) = problem.retrieve_input_output_operation(&self.graph)?;
 
         let inputs = problem.tensors_from_example(&example)?;
+        if !inputs.is_standard_layout() {
+            panic!("ndarray should be in standard layout");
+        }
 
         let tensor = tensor_from_ndarray(&inputs);
         let output = problem.feed(&self.session, &input_op, &output_op, &tensor)?;
@@ -255,7 +258,7 @@ impl TensorflowProblem for PhonyProblem {
     ) -> Result<Array2<Self::TensorInputType>, Box<dyn Error>> {
         let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
 
-        let mut result = Array2::zeros((ngrams.len(), Self::WINDOW).f());
+        let mut result = Array2::zeros((ngrams.len(), Self::WINDOW));
 
         for (i, ngram) in ngrams.iter().enumerate() {
             for (j, c) in ngram.iter().enumerate() {
@@ -468,10 +471,10 @@ mod tests {
 
     #[test]
     fn create_tensor_from_ndarray() {
-        let ndarray = arr2(&[[1, 2], [3,4]]);
+        let ndarray = arr2(&[[1, 2], [3, 4]]);
         let tensor = tensor_from_ndarray(&ndarray);
         assert_eq!(tensor.dims(), &[2, 2]);
         let content = tensor.iter().cloned().collect::<Vec<_>>();
-        assert_eq!(content, vec![1, 2, 3 ,4]);
+        assert_eq!(content, vec![1, 2, 3, 4]);
     }
 }
