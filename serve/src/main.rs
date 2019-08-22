@@ -4,7 +4,7 @@ extern crate tensorflow;
 use clap::App;
 use std::env;
 
-use ndarray::{Array, Array2, ArrayBase, ShapeBuilder};
+use ndarray::{Array, Array2, ArrayBase};
 use std::error::Error;
 use std::io::{stdin, BufRead};
 use std::ops::Range;
@@ -113,7 +113,7 @@ where
 }
 
 fn ndarray_from_tensor<T: TensorType + Copy>(input: &Tensor<T>) -> Array2<T> {
-    let vector = Array::from_iter(input.iter().map(|i| *i));
+    let vector = Array::from_iter(input.iter().cloned());
     let [rows, columns] = match *input.dims() {
         [a, b] => [a, b],
         _ => panic!("Should be 2-dimensional "),
