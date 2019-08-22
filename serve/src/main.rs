@@ -85,7 +85,7 @@ impl TensorflowRunner {
         let problem = P::new_context(&example)?;
         let (input_op, output_op) = problem.retrieve_input_output_operation(&self.graph)?;
 
-        let inputs = problem.tensors_from_example(&example)?;
+        let inputs = problem.tensors_from_example(&example);
         if !inputs.is_standard_layout() {
             panic!("ndarray should be in standard layout");
         }
@@ -125,10 +125,20 @@ fn ndarray_from_tensor<T: TensorType + Copy>(input: &Tensor<T>) -> Array2<T> {
 /// Микрофреймворк для решения задач при помощи библиотеки Tensorflow.
 ///
 /// Подразумевается, что используя framework программист определяет следующие аспекты поведения:
-/// * как из модели достать точки входа и выхода. Вход – это placeholder, который определяется при помощи
-/// входного тензора. Выход – это ответ системы, который содержит пометку класса или любую другую информацию, которая
-/// является целью вычислений.
-/// * как из примера получить тензор
+/// * логику формирования контекста вычислений (`new_context`). Контекст позволяет выполнить любую требуемую
+/// конвертацию или предобработку для примера. Так же контекст бывает удобен чтобы сохранить информацию о примере,
+/// требуемую для полноценной интепретации результатов вычислений.
+/// * как из tensorflow-модели достать точки входа и выхода (константы `GRAPH_INPUT_NAME` и `GRAPH_OUTPUT_NAME`).
+/// Вход – это значение placeholder'а входного тензора.
+/// Выход – это ответ системы, который содержит пометку класса или любую другую информацию, которая
+/// является целью вычислений. И вход и выход являются именами соответствующх placeholder'ов/слоев в tensorflow-модели.
+/// Поэтому, они должны быть определена в графе и в данной абстракции согласованным образом;
+/// * логика получения тензора из примера (`tensors_from_example`). Каждый входящий пример (тип `Input`)
+/// должен быть преобразован в тензор, размерность которого согласуется с размерностью входного placeholder'а
+/// вычислительного графа tensorflow;
+/// * логика преобразования выходного тензора в результат вычислений (`output_from_tensors`). Этот код интерпретирует
+/// результат вычислений tensorflow и формирует ответ (тип `Output` – класс, пометка, координаты найденой
+/// области и т.д.);
 pub trait TensorflowProblem {
     /// Тип тензора-входа (`u32`/`f32` и т.д.)
     type TensorInputType: TensorType + Copy;
@@ -136,36 +146,58 @@ pub trait TensorflowProblem {
     /// Тип тензора-выхода (`u32`/`f32` и т.д.)
     type TensorOutputType: TensorType + Copy;
 
-    const INPUT_OPERATION: &'static str;
-    const OUTPUT_OPERATION: &'static str;
-
+    /// Тип обрабатываемого примера. Например для задач классификации текстов: входной пример будет иметь тип `String`.
     type Input: ?Sized;
+
+    /// Тип результата обработки. Для задач классификации это может быть `enum` с возможными классами.
     type Output;
 
+    /// Имя placeholder'а входа в вычислительном графе tensorflow
+    const GRAPH_INPUT_NAME: &'static str;
+
+    /// Имя выходного слоя в вычислительном графе tensorflow
+    const GRAPH_OUTPUT_NAME: &'static str;
+
+    /// Создает контекст из входного примера.
+    ///
+    /// Контекст – абстракция позволяющая решить две задачи:
+    /// * определить логику конвертации и предварительной обработки примера в вид более удобный для конвертации
+    /// в тензор. Это позволяет упростить реализацию метода `tensors_from_example`. Это бывает полезно когда
+    /// из одного примера необходимо генерировать несколько тензоров. Вынос предварительных вычислений
+    /// в контекст позволяет избежать дублирующих вычислений;
+    /// * сохранить информацию необходимую для интерпретации ответа вычислительного графа. Контекст доступен как
+    /// в методу `tensors_from_example` так и методу `output_from_tensors`. Поэтому, его удобно использовать
+    /// когда ответ вычислительного графа не является самостоятельгым и требует дальнейшей интерпретации на основании
+    /// входных данных.
     fn new_context(example: &Self::Input) -> Result<Self, Box<dyn Error>>
     where
         Self: Sized;
 
-    fn tensors_from_example(
+    /// Формирует из примера тензор, который в последствии будет играть роль входных данных для tensorflow-графа.
+    ///
+    /// Тензор возвращаемый из этого метода по своей форме должен быть совместим с placeholder'ом вычислительного
+    /// графа указанным в константе `GRAPH_INPUT_NAME`.
+    fn tensors_from_example(&self, example: &Self::Input) -> Array2<Self::TensorInputType>;
+
+    /// Формирует ответ системы на основании вычислений tensorflow.
+    ///
+    /// Принимает исходный пример, а также тензор из слоя указанного в `GRAPH_OUTPUT_NAME`. На основании этой
+    /// информации формирует конечный ответ на задачу целиком.
+    fn output_from_tensors(
         &self,
         example: &Self::Input,
-    ) -> Result<Array2<Self::TensorInputType>, Box<dyn Error>>;
+        tensor: Array2<Self::TensorOutputType>,
+    ) -> Self::Output;
 
     fn retrieve_input_output_operation(
         &self,
         graph: &Graph,
     ) -> Result<(Operation, Operation), Status> {
-        let input = graph.operation_by_name_required(Self::INPUT_OPERATION)?;
-        let output = graph.operation_by_name_required(Self::OUTPUT_OPERATION)?;
+        let input = graph.operation_by_name_required(Self::GRAPH_INPUT_NAME)?;
+        let output = graph.operation_by_name_required(Self::GRAPH_OUTPUT_NAME)?;
 
         Ok((input, output))
     }
-
-    fn output_from_tensors(
-        &self,
-        example: &Self::Input,
-        tensors: Array2<Self::TensorOutputType>,
-    ) -> Self::Output;
 
     fn fetch_tensor(
         &self,
@@ -231,8 +263,8 @@ impl TensorflowProblem for PhonyProblem {
     type TensorOutputType = f32;
     type Input = str;
     type Output = Vec<bool>;
-    const INPUT_OPERATION: &'static str = "input";
-    const OUTPUT_OPERATION: &'static str = "output/Reshape";
+    const GRAPH_INPUT_NAME: &'static str = "input";
+    const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
 
     fn new_context(example: &Self::Input) -> Result<Self, Box<dyn Error>> {
         if let Some((left_padding, padded_string, right_padding)) =
@@ -252,10 +284,7 @@ impl TensorflowProblem for PhonyProblem {
         }
     }
 
-    fn tensors_from_example(
-        &self,
-        _e: &Self::Input,
-    ) -> Result<Array2<Self::TensorInputType>, Box<dyn Error>> {
+    fn tensors_from_example(&self, _e: &Self::Input) -> Array2<Self::TensorInputType> {
         let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
 
         let mut result = Array2::zeros((ngrams.len(), Self::WINDOW));
@@ -266,7 +295,7 @@ impl TensorflowProblem for PhonyProblem {
             }
         }
 
-        Ok(result)
+        result
     }
 
     fn output_from_tensors(
