@@ -10,10 +10,8 @@ use std::io::{stdin, BufRead};
 use std::ops::Range;
 use std::path::Path;
 use std::process::exit;
-use tensorflow::{
-    FetchToken, Graph, Operation, Session, SessionOptions, SessionRunArgs, Status, Tensor,
-    TensorType,
-};
+use tensorflow as tf;
+use tf::{Graph, Operation, Session, SessionOptions, SessionRunArgs, Status, Tensor, TensorType};
 
 use encoding::all::WINDOWS_1251;
 use encoding::{EncoderTrap, Encoding};
@@ -83,39 +81,51 @@ impl TensorflowRunner {
         example: &P::Input,
     ) -> Result<P::Output, Box<dyn Error>> {
         let problem = P::new_context(&example)?;
-        let (input_op, output_op) = problem.retrieve_input_output_operation(&self.graph)?;
+        let (input_op, output_op) = problem.retrieve_input_output(&self.graph)?;
 
         let inputs = problem.tensors_from_example(&example);
         assert!(inputs.is_standard_layout(), "ndarray should be in standard (row-major) layout. Make sure you doesn't use ShapeBuilder::f() method when creating tensors");
 
         let tensor = tensor_from_ndarray(inputs);
-        problem
+        let output = problem
             .feed(&self.session, &input_op, &output_op, &tensor)
             .map(ndarray_from_tensor)
-            .map(|output| problem.output_from_tensors(&example, output))
+            .map(|output| problem.output_from_tensors(&example, output))?;
+
+        Ok(output)
     }
 }
+
+use std::convert::TryFrom;
 
 fn tensor_from_ndarray<T, S>(input: Array<T, S>) -> Tensor<T>
 where
     T: TensorType,
     S: ndarray::Dimension,
 {
-    let shape = input.shape().iter().map(|i| *i as u64).collect::<Vec<_>>();
-    let slice = input.as_slice().expect("Can't get slice from ndarray");
+    let shape = input
+        .shape()
+        .iter()
+        .cloned()
+        .map(u64::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Unable to get ndarray::Array shape");
+
+    let data = input.as_slice().expect("Can't get slice from ndarray");
     Tensor::new(&shape[..])
-        .with_values(slice)
+        .with_values(data)
         .expect("Can't build tensor")
 }
 
 fn ndarray_from_tensor<T: TensorType + Copy>(input: Tensor<T>) -> Array2<T> {
-    let vector = Array::from_iter(input.iter().cloned());
     let [rows, columns] = match *input.dims() {
         [a, b] => [a, b],
-        _ => panic!("Should be 2-dimensional "),
+        _ => panic!("Should be 2-dimensional"),
     };
-    let dims = (rows as usize, columns as usize);
-    vector.into_shape(dims).expect("Unable to reshape")
+    let dims = [rows as usize, columns as usize];
+    Array::from_iter(input.iter().cloned())
+        .into_shape(dims)
+        .expect("Unable to reshape")
 }
 
 /// Микрофреймворк для решения задач при помощи библиотеки Tensorflow.
@@ -185,22 +195,11 @@ pub trait TensorflowProblem {
         tensor: Array2<Self::TensorOutputType>,
     ) -> Self::Output;
 
-    fn retrieve_input_output_operation(
-        &self,
-        graph: &Graph,
-    ) -> Result<(Operation, Operation), Status> {
+    fn retrieve_input_output(&self, graph: &Graph) -> tf::Result<(Operation, Operation)> {
         let input = graph.operation_by_name_required(Self::GRAPH_INPUT_NAME)?;
         let output = graph.operation_by_name_required(Self::GRAPH_OUTPUT_NAME)?;
 
         Ok((input, output))
-    }
-
-    fn fetch_tensor(
-        &self,
-        args: &mut SessionRunArgs,
-        token: FetchToken,
-    ) -> Result<Tensor<Self::TensorOutputType>, Status> {
-        args.fetch::<Self::TensorOutputType>(token)
     }
 
     fn feed(
@@ -209,14 +208,13 @@ pub trait TensorflowProblem {
         input_op: &Operation,
         output_op: &Operation,
         input: &Tensor<Self::TensorInputType>,
-    ) -> Result<Tensor<Self::TensorOutputType>, Box<dyn Error>> {
+    ) -> tf::Result<Tensor<Self::TensorOutputType>> {
         let mut run_args = SessionRunArgs::new();
         run_args.add_feed(&input_op, 0, input);
         let output_token = run_args.request_fetch(&output_op, 0);
 
         session.run(&mut run_args)?;
-
-        Ok(run_args.fetch(output_token)?)
+        run_args.fetch(output_token)
     }
 }
 
