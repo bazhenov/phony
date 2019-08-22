@@ -3,12 +3,12 @@ extern crate tensorflow;
 
 pub mod tf_problem;
 
-use clap::App;
+use clap::{App, ArgMatches, SubCommand};
 use std::env;
 
 use ndarray::Array2;
 use std::error::Error;
-use std::io::{stdin, BufRead};
+use std::io::{stdin, BufRead, Stdin};
 use std::ops::Range;
 use std::process::exit;
 use tf_problem::{TensorflowProblem, TensorflowRunner};
@@ -21,16 +21,34 @@ fn main() {
         .author("Denis Bazhenov <dotsid@gmail.com>")
         .version("1.0.0")
         .about("CLI utility for phony classification problem")
-        .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'")
-        .arg_from_usage("[only_mode] -o, --only 'Print only matched characters from phone'")
+        .subcommand(
+            SubCommand::with_name("inference")
+                .about("run inference over examples from stdin")
+                .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'")
+                .arg_from_usage(
+                    "[only_mode] -o, --only 'Print only matched characters from phone'",
+                ),
+        )
         .get_matches();
 
+    match matches.subcommand() {
+        ("inference", Some(matches)) => {
+            inference(&matches, &stdin());
+        }
+        _ => {
+            eprintln!("{}", matches.usage());
+            exit(1);
+        }
+    }
+}
+
+fn inference(matches: &ArgMatches, stdin: &Stdin) {
     env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
     let model_path = matches.value_of("model").unwrap();
     let only_mode = matches.is_present("only_mode");
 
     if let Ok(runner) = TensorflowRunner::create_session(model_path) {
-        for line in stdin().lock().lines() {
+        for line in stdin.lock().lines() {
             let line = line.expect("Unable to read line");
             let line = line.trim();
             match runner.run_problem::<PhonyProblem>(line) {
