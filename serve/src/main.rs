@@ -1,7 +1,7 @@
 extern crate encoding;
 extern crate tensorflow;
 
-mod tf_problem;
+pub mod tf_problem;
 
 use clap::App;
 use std::env;
