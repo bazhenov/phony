@@ -1,5 +1,7 @@
 extern crate encoding;
 extern crate tensorflow;
+#[macro_use(s)]
+extern crate ndarray;
 
 pub mod tf_problem;
 
@@ -29,11 +31,19 @@ fn main() {
                     "[only_mode] -o, --only 'Print only matched characters from phone'",
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("export")
+                .about("export learning data in HDF5 format")
+                .arg_from_usage("<file> -o, --output=[FILE] 'Output file'"),
+        )
         .get_matches();
 
     match matches.subcommand() {
         ("inference", Some(matches)) => {
-            inference(&matches, &stdin());
+            inference(&matches);
+        }
+        ("export", Some(matches)) => {
+            export(&matches);
         }
         _ => {
             eprintln!("{}", matches.usage());
@@ -42,13 +52,34 @@ fn main() {
     }
 }
 
-fn inference(matches: &ArgMatches, stdin: &Stdin) {
+fn export(matches: &ArgMatches) {
+    use hdf5::File;
+
+    let file = matches.value_of("file").unwrap();
+    let file = File::open(file, "w").expect("Unable to open file");
+    let dataset = file
+        .new_dataset::<f32>()
+        .create("input", (26, 16))
+        .expect("Unable to create dataset");
+
+    for line in stdin().lock().lines() {
+        let line = line.expect("Unable to read line");
+        let line = line.trim();
+
+        let p = PhonyProblem::new_context(&line).expect("Unable to create problem");
+        let t = p.tensors_from_example(&line);
+        dataset.write(t.slice(s![.., ..])).expect("Unable to write");
+        break;
+    }
+}
+
+fn inference(matches: &ArgMatches) {
     env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
     let model_path = matches.value_of("model").unwrap();
     let only_mode = matches.is_present("only_mode");
 
     let runner = TensorflowRunner::create_session(model_path).expect("Unable to create session");
-    for line in stdin.lock().lines() {
+    for line in stdin().lock().lines() {
         let line = line.expect("Unable to read line");
         let line = line.trim();
         match runner.run_problem::<PhonyProblem>(line) {
