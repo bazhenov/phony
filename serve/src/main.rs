@@ -72,7 +72,7 @@ fn export_features(matches: &ArgMatches) {
         let line = line.expect("Unable to read line");
         let record =
             serde_json::from_str::<PhonySample>(line.trim()).expect("Unable to read sample");
-        let problem = PhonyProblem::new_context(&record).expect("Unable to create context");
+        let problem = PhonyProblem::new(&record).expect("Unable to create context");
         let features = problem.features();
 
         input_group
@@ -93,7 +93,8 @@ fn inference(matches: &ArgMatches) {
         let line = line.expect("Unable to read line");
         let record = serde_json::from_str::<PhonySample>(line.trim())
             .expect("Unable to read record from stdin");
-        match runner.run_problem::<PhonyProblem>(&record) {
+        let problem = PhonyProblem::new(&record).expect("Unable to build problem");
+        match runner.run_problem(&problem) {
             Ok(mask) => {
                 if only_mode {
                     for span in mask.iter().spans(|c| *c) {
@@ -130,6 +131,24 @@ struct PhonyProblem {
 impl PhonyProblem {
     const WINDOW: usize = 16;
 
+    fn new(example: &PhonySample) -> Result<Self, Box<dyn Error>> {
+        if let Some((left_padding, padded_string, right_padding)) =
+            Self::pad_string(&example.text, Self::WINDOW)
+        {
+            Ok(PhonyProblem {
+                chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
+                left_padding,
+                right_padding,
+            })
+        } else {
+            Ok(PhonyProblem {
+                chars: WINDOWS_1251.encode(&example.text, EncoderTrap::Strict)?,
+                left_padding: 0,
+                right_padding: 0,
+            })
+        }
+    }
+
     fn pad_string(string: &str, desired_length: usize) -> Option<(usize, String, usize)> {
         let char_length = string.chars().count();
         if char_length >= desired_length {
@@ -162,24 +181,6 @@ impl TensorflowProblem for PhonyProblem {
     type Output = Vec<bool>;
     const GRAPH_INPUT_NAME: &'static str = "input";
     const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
-
-    fn new_context(example: &Self::Input) -> Result<Self, Box<dyn Error>> {
-        if let Some((left_padding, padded_string, right_padding)) =
-            Self::pad_string(&example.text, Self::WINDOW)
-        {
-            Ok(PhonyProblem {
-                chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
-                left_padding,
-                right_padding,
-            })
-        } else {
-            Ok(PhonyProblem {
-                chars: WINDOWS_1251.encode(&example.text, EncoderTrap::Strict)?,
-                left_padding: 0,
-                right_padding: 0,
-            })
-        }
-    }
 
     fn features(&self) -> Array2<Self::TensorInputType> {
         let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
