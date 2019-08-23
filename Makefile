@@ -16,7 +16,7 @@ ifdef EPOCHS
 endif
 
 clean:
-	rm -f private/input.ndjson
+	rm -f private/input.ndjson private/sample.txt
 
 # Runs ipython instance in a tensorflow notebook for experiments
 ipython:
@@ -34,11 +34,11 @@ build:
 build-gpu:
 	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1-gpu learn
 
-# Runs phone prepare augmentator
-private/input.ndjson: private/sample.txt
-	pv private/sample.txt | serve/target/release/augment -s > $@
-
 private/sample.txt:
 	sq mask -l '<PHONE>' private/sq.ndjson | sort | uniq > $@
+
+# Runs phone prepare augmentator
+private/input.ndjson: private/sample.txt
+	pv private/sample.txt | augment -s > $@
 
 .PHONY: build learn test ipython
