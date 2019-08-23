@@ -3,13 +3,14 @@ extern crate clap;
 
 mod digits;
 mod numerate;
+mod sample;
 
 use clap::App;
 use digits::Digits;
 use numerate::numerate;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use serde::Serialize;
+use sample::PhonySample;
 use std::collections::HashMap;
 use std::io::{stdin, stdout, BufRead};
 
@@ -38,7 +39,7 @@ fn main() {
         for line in stdin().lock().lines() {
             let line = line.expect("Unable to read");
             for _ in 0..count {
-                let sample = AugmentedSample::create(&line, &mut generator);
+                let sample = PhonySample::create(&line, &mut generator);
                 serde_json::to_writer(stdout(), &sample).expect("Unable to write json");
                 println!();
             }
@@ -371,51 +372,6 @@ impl PostProcessingRule for InsertCharacterPostProcessing {
     }
 }
 
-#[derive(Serialize)]
-struct AugmentedSample {
-    message: String,
-    phone_indexes: Vec<(usize, usize)>,
-}
-
-impl AugmentedSample {
-    fn create<T: AsRef<str>>(
-        text: &str,
-        values: &mut impl Iterator<Item = T>,
-    ) -> Option<AugmentedSample> {
-        let mut message = String::with_capacity(text.len());
-        let mut offset_chars = 0;
-        let mut span = text;
-        let pattern = "<PHONE>";
-        let mut phone_indexes = vec![];
-
-        while let Some(match_offset) = span.find(pattern) {
-            offset_chars += span[..match_offset].chars().count();
-            message.push_str(&span[..match_offset]);
-            if let Some(n) = values.next() {
-                let replacement = n.as_ref();
-                let replacement_chars_length = replacement.chars().count();
-                phone_indexes.push((offset_chars, offset_chars + replacement_chars_length));
-                message.push_str(replacement);
-
-                offset_chars += replacement_chars_length;
-            } else {
-                return None;
-            }
-
-            span = &span[match_offset + pattern.len()..];
-        }
-
-        if !span.is_empty() {
-            message.push_str(span);
-        }
-
-        Some(AugmentedSample {
-            message,
-            phone_indexes,
-        })
-    }
-}
-
 mod tests {
 
     #![allow(unused)]
@@ -502,21 +458,5 @@ mod tests {
         g.register_postprocessor(1, Box::new(PlusSevenPostProcessingRule));
 
         println!("{}", g.generate_random());
-    }
-
-    #[test]
-    fn test_create_augmented_sample() {
-        let text = "Первый: <PHONE>, второй: <PHONE>";
-        let list = vec!["1", "2"];
-        let sample = AugmentedSample::create(text, &mut list.iter()).unwrap();
-
-        assert_eq!(sample.message, "Первый: 1, второй: 2");
-        assert_eq!(sample.phone_indexes, vec![(8, 9), (19, 20)]);
-
-        let json = serde_json::to_string(&sample).unwrap();
-        assert_eq!(
-            json,
-            r#"{"message":"Первый: 1, второй: 2","phone_indexes":[[8,9],[19,20]]}"#
-        )
     }
 }

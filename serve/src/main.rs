@@ -3,6 +3,7 @@ extern crate tensorflow;
 #[macro_use(s)]
 extern crate ndarray;
 
+pub mod sample;
 pub mod tf_problem;
 
 use clap::{App, ArgMatches, SubCommand};
@@ -33,7 +34,7 @@ fn main() {
         )
         .subcommand(
             SubCommand::with_name("export")
-                .about("export learning data in HDF5 format")
+                .about("export features learning data in HDF5 format")
                 .arg_from_usage("<file> -o, --output=[FILE] 'Output file'"),
         )
         .get_matches();
@@ -43,7 +44,7 @@ fn main() {
             inference(&matches);
         }
         ("export", Some(matches)) => {
-            export(&matches);
+            export_features(&matches);
         }
         _ => {
             eprintln!("{}", matches.usage());
@@ -52,7 +53,12 @@ fn main() {
     }
 }
 
-fn export(matches: &ArgMatches) {
+// Срабатывает deref_addrof на макрос s![.., ..]. Не смог разобраться как исправить,
+// поэтому отключил. Рекоммендация использовать s![.., ..] есть в официальной документации
+// ndarray.
+// см. https://rust-lang.github.io/rust-clippy/master/index.html#deref_addrof
+#[allow(clippy::deref_addrof)]
+fn export_features(matches: &ArgMatches) {
     use hdf5::File;
 
     let file = matches.value_of("file").unwrap();
