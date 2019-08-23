@@ -10,7 +10,7 @@ use std::env;
 
 use ndarray::Array2;
 use std::error::Error;
-use std::io::{stdin, BufRead, Stdin};
+use std::io::{stdin, BufRead};
 use std::ops::Range;
 use std::process::exit;
 use tf_problem::{TensorflowProblem, TensorflowRunner};
@@ -56,20 +56,22 @@ fn export(matches: &ArgMatches) {
     use hdf5::File;
 
     let file = matches.value_of("file").unwrap();
-    let file = File::open(file, "w").expect("Unable to open file");
-    let dataset = file
-        .new_dataset::<f32>()
-        .create("input", (26, 16))
-        .expect("Unable to create dataset");
+    let input_group = File::open(file, "w")
+        .and_then(|f| f.create_group("input"))
+        .expect("Unable to open group");
 
-    for line in stdin().lock().lines() {
+    for (i, line) in stdin().lock().lines().enumerate() {
         let line = line.expect("Unable to read line");
         let line = line.trim();
 
         let p = PhonyProblem::new_context(&line).expect("Unable to create problem");
         let t = p.tensors_from_example(&line);
-        dataset.write(t.slice(s![.., ..])).expect("Unable to write");
-        break;
+
+        input_group
+            .new_dataset::<f32>()
+            .create(&format!("{}", i), t.dim())
+            .and_then(|dataset| dataset.write(t.slice(s![.., ..])))
+            .expect("Unable to create dataset");
     }
 }
 
