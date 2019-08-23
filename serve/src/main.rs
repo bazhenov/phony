@@ -16,6 +16,8 @@ use std::ops::Range;
 use std::process::exit;
 use tf_problem::{TensorflowProblem, TensorflowRunner};
 
+use sample::PhonySample;
+
 use encoding::all::WINDOWS_1251;
 use encoding::{EncoderTrap, Encoding};
 
@@ -54,7 +56,7 @@ fn main() {
 }
 
 // Срабатывает deref_addrof на макрос s![.., ..]. Не смог разобраться как исправить,
-// поэтому отключил. Рекоммендация использовать s![.., ..] есть в официальной документации
+// поэтому отключил. Рекомендация использовать s![.., ..] есть в официальной документации
 // ndarray.
 // см. https://rust-lang.github.io/rust-clippy/master/index.html#deref_addrof
 #[allow(clippy::deref_addrof)]
@@ -68,15 +70,15 @@ fn export_features(matches: &ArgMatches) {
 
     for (i, line) in stdin().lock().lines().enumerate() {
         let line = line.expect("Unable to read line");
-        let line = line.trim();
-
-        let p = PhonyProblem::new_context(&line).expect("Unable to create problem");
-        let t = p.tensors_from_example(&line);
+        let record =
+            serde_json::from_str::<PhonySample>(line.trim()).expect("Unable to read sample");
+        let problem = PhonyProblem::new_context(&record).expect("Unable to create context");
+        let features = problem.features();
 
         input_group
             .new_dataset::<f32>()
-            .create(&format!("{}", i), t.dim())
-            .and_then(|dataset| dataset.write(t.slice(s![.., ..])))
+            .create(&format!("{}", i), features.dim())
+            .and_then(|dataset| dataset.write(features.slice(s![.., ..])))
             .expect("Unable to create dataset");
     }
 }
@@ -89,8 +91,9 @@ fn inference(matches: &ArgMatches) {
     let runner = TensorflowRunner::create_session(model_path).expect("Unable to create session");
     for line in stdin().lock().lines() {
         let line = line.expect("Unable to read line");
-        let line = line.trim();
-        match runner.run_problem::<PhonyProblem>(line) {
+        let record = serde_json::from_str::<PhonySample>(line.trim())
+            .expect("Unable to read record from stdin");
+        match runner.run_problem::<PhonyProblem>(&record) {
             Ok(mask) => {
                 if only_mode {
                     for span in mask.iter().spans(|c| *c) {
@@ -155,14 +158,14 @@ impl PhonyProblem {
 impl TensorflowProblem for PhonyProblem {
     type TensorInputType = f32;
     type TensorOutputType = f32;
-    type Input = str;
+    type Input = PhonySample;
     type Output = Vec<bool>;
     const GRAPH_INPUT_NAME: &'static str = "input";
     const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
 
     fn new_context(example: &Self::Input) -> Result<Self, Box<dyn Error>> {
         if let Some((left_padding, padded_string, right_padding)) =
-            Self::pad_string(example, Self::WINDOW)
+            Self::pad_string(&example.text, Self::WINDOW)
         {
             Ok(PhonyProblem {
                 chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
@@ -171,14 +174,14 @@ impl TensorflowProblem for PhonyProblem {
             })
         } else {
             Ok(PhonyProblem {
-                chars: WINDOWS_1251.encode(example, EncoderTrap::Strict)?,
+                chars: WINDOWS_1251.encode(&example.text, EncoderTrap::Strict)?,
                 left_padding: 0,
                 right_padding: 0,
             })
         }
     }
 
-    fn tensors_from_example(&self, _e: &Self::Input) -> Array2<Self::TensorInputType> {
+    fn features(&self) -> Array2<Self::TensorInputType> {
         let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
 
         let mut result = Array2::zeros((ngrams.len(), Self::WINDOW));
@@ -192,11 +195,7 @@ impl TensorflowProblem for PhonyProblem {
         result
     }
 
-    fn output_from_tensors(
-        &self,
-        _example: &Self::Input,
-        tensors: Array2<Self::TensorOutputType>,
-    ) -> Vec<bool> {
+    fn output(&self, tensors: Array2<Self::TensorOutputType>) -> Vec<bool> {
         let mut mask = vec![Accumulator(0, 0); self.chars.len()];
         let character_length = self.chars.len() - self.left_padding - self.right_padding;
 

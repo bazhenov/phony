@@ -4,8 +4,8 @@ type CharacterSpan = (usize, usize);
 
 #[derive(Serialize, Deserialize)]
 pub struct PhonySample {
-    text: String,
-    spans: Vec<CharacterSpan>,
+    pub text: String,
+    pub spans: Vec<CharacterSpan>,
 }
 
 impl PhonySample {
