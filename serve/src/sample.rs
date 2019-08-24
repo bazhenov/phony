@@ -9,7 +9,7 @@ pub struct PhonySample {
 }
 
 impl PhonySample {
-    pub fn create<T: AsRef<str>>(
+    pub fn augment<T: AsRef<str>>(
         message: &str,
         values: &mut impl Iterator<Item = T>,
     ) -> Option<PhonySample> {
@@ -53,7 +53,7 @@ mod tests {
     fn test_create_augmented_sample() {
         let text = "Первый: <PHONE>, второй: <PHONE>";
         let list = vec!["1", "2"];
-        let sample = PhonySample::create(text, &mut list.iter()).unwrap();
+        let sample = PhonySample::augment(text, &mut list.iter()).unwrap();
 
         assert_eq!(sample.text, "Первый: 1, второй: 2");
         assert_eq!(sample.spans, vec![(8, 9), (19, 20)]);

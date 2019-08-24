@@ -39,7 +39,7 @@ fn main() {
         for line in stdin().lock().lines() {
             let line = line.expect("Unable to read");
             for _ in 0..count {
-                let sample = PhonySample::create(&line, &mut generator);
+                let sample = PhonySample::augment(&line, &mut generator);
                 serde_json::to_writer(stdout(), &sample).expect("Unable to write json");
                 println!();
             }
