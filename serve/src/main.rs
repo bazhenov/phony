@@ -9,7 +9,7 @@ pub mod tf_problem;
 use clap::{App, ArgMatches, SubCommand};
 use std::env;
 
-use ndarray::Array2;
+use ndarray::{arr2, Array1, Array2};
 use std::error::Error;
 use std::io::{stdin, BufRead};
 use std::ops::Range;
@@ -122,31 +122,53 @@ fn inference(matches: &ArgMatches) {
     }
 }
 
-struct PhonyProblem {
+struct PhonyProblem<'a> {
     chars: Vec<u8>,
     left_padding: usize,
     right_padding: usize,
+    sample: &'a PhonySample,
 }
 
-impl PhonyProblem {
+impl<'a> PhonyProblem<'a> {
     const WINDOW: usize = 16;
 
-    fn new(example: &PhonySample) -> Result<Self, Box<dyn Error>> {
+    fn new(sample: &'a PhonySample) -> Result<Self, Box<dyn Error>> {
         if let Some((left_padding, padded_string, right_padding)) =
-            Self::pad_string(&example.text, Self::WINDOW)
+            Self::pad_string(&sample.text, Self::WINDOW)
         {
             Ok(PhonyProblem {
                 chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
                 left_padding,
                 right_padding,
+                sample,
             })
         } else {
             Ok(PhonyProblem {
-                chars: WINDOWS_1251.encode(&example.text, EncoderTrap::Strict)?,
+                chars: WINDOWS_1251.encode(&sample.text, EncoderTrap::Strict)?,
                 left_padding: 0,
                 right_padding: 0,
+                sample,
             })
         }
+    }
+
+    fn ground_truth(&self) -> Array2<f32> {
+        let mut mask1d = Array1::<f32>::zeros(self.chars.len());
+
+        for span in &self.sample.spans {
+            let from = self.left_padding + span.0;
+            let to = self.left_padding + span.1;
+            mask1d.slice_mut(s![from..to]).fill(1.);
+        }
+
+        let ngrams = self.chars.len() - Self::WINDOW + 1;
+        let mut mask2d = Array2::<f32>::zeros((ngrams, Self::WINDOW));
+
+        for (i, mut row) in mask2d.genrows_mut().into_iter().enumerate() {
+            row.assign(&mask1d.slice(s![i..i + Self::WINDOW]));
+        }
+
+        mask2d
     }
 
     fn pad_string(string: &str, desired_length: usize) -> Option<(usize, String, usize)> {
@@ -174,7 +196,7 @@ impl PhonyProblem {
     }
 }
 
-impl TensorflowProblem for PhonyProblem {
+impl<'a> TensorflowProblem for PhonyProblem<'a> {
     type TensorInputType = f32;
     type TensorOutputType = f32;
     type Input = PhonySample;
@@ -380,5 +402,24 @@ mod tests {
         assert_eq!(spans[0], 0..2);
         assert_eq!(spans[1], 3..5);
         assert_eq!(spans[2], 8..9);
+    }
+
+    #[test]
+    fn should_be_able_to_reconstruct_ground_truth_labels() {
+        let example = PhonySample {
+            text: String::from("text"),
+            spans: vec![(0, 1), (2, 4)],
+        };
+        let p = PhonyProblem::new(&example).unwrap();
+
+        let truth = p.ground_truth();
+        assert_eq!(p.left_padding, 6);
+        assert_eq!(p.right_padding, 6);
+        // Индексы в маске смещены из за padding'а. Это необходимо учитывать при изменений ширины окна
+        assert_eq!(
+            truth,
+            arr2(&[[0., 0., 0., 0., 0., 0., 1., 0., 1., 1., 0., 0., 0., 0., 0., 0.,]])
+        );
+        //assert_eq!(p.output(truth), vec![(0, 1), (2, 4)]);
     }
 }
