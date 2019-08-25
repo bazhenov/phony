@@ -9,7 +9,7 @@ pub mod tf_problem;
 use clap::{App, ArgMatches, SubCommand};
 use std::env;
 
-use ndarray::{arr2, Array1, Array2};
+use ndarray::{Array1, Array2};
 use std::error::Error;
 use std::io::{stdin, BufRead};
 use std::ops::Range;
@@ -21,7 +21,7 @@ use sample::PhonySample;
 use encoding::all::WINDOWS_1251;
 use encoding::{EncoderTrap, Encoding};
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let matches = App::new("phony-serve")
         .author("Denis Bazhenov <dotsid@gmail.com>")
         .version("1.0.0")
@@ -42,12 +42,8 @@ fn main() {
         .get_matches();
 
     match matches.subcommand() {
-        ("inference", Some(matches)) => {
-            inference(&matches);
-        }
-        ("export", Some(matches)) => {
-            export_features(&matches);
-        }
+        ("inference", Some(matches)) => inference(&matches),
+        ("export", Some(matches)) => export_features(&matches),
         _ => {
             eprintln!("{}", matches.usage());
             exit(1);
@@ -60,66 +56,67 @@ fn main() {
 // ndarray.
 // см. https://rust-lang.github.io/rust-clippy/master/index.html#deref_addrof
 #[allow(clippy::deref_addrof)]
-fn export_features(matches: &ArgMatches) {
+fn export_features(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     use hdf5::File;
 
     let file = matches.value_of("file").unwrap();
-    let input_group = File::open(file, "w")
-        .and_then(|f| f.create_group("input"))
-        .expect("Unable to open group");
+    let file = File::open(file, "w")?;
+    let input_group = file.create_group("input")?;
+    let output_group = file.create_group("output")?;
 
-    for (i, line) in stdin().lock().lines().enumerate() {
-        let line = line.expect("Unable to read line");
-        let record =
-            serde_json::from_str::<PhonySample>(line.trim()).expect("Unable to read sample");
-        let problem = PhonyProblem::new(&record).expect("Unable to create context");
+    for (line_no, json) in stdin().lock().lines().enumerate() {
+        let json = json?;
+        let record = serde_json::from_str::<PhonySample>(json.trim())
+            .expect(&format!("Unable to prase JSON on line {}", line_no));
+        let problem = PhonyProblem::new(&record)?;
+        let example_id = format!("{}", line_no);
+
         let features = problem.features();
-
         input_group
             .new_dataset::<f32>()
-            .create(&format!("{}", i), features.dim())
-            .and_then(|dataset| dataset.write(features.slice(s![.., ..])))
-            .expect("Unable to create dataset");
+            .create(&example_id, features.dim())
+            .and_then(|dataset| dataset.write(features.slice(s![.., ..])))?;
+
+        let ground_truth = problem.ground_truth();
+        output_group
+            .new_dataset::<f32>()
+            .create(&example_id, ground_truth.dim())
+            .and_then(|dataset| dataset.write(ground_truth.slice(s![.., ..])))?;
     }
+
+    Ok(())
 }
 
-fn inference(matches: &ArgMatches) {
+fn inference(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
     let model_path = matches.value_of("model").unwrap();
     let only_mode = matches.is_present("only_mode");
 
-    let runner = TensorflowRunner::create_session(model_path).expect("Unable to create session");
+    let runner = TensorflowRunner::create_session(model_path)?;
     for line in stdin().lock().lines() {
-        let line = line.expect("Unable to read line");
-        let record = serde_json::from_str::<PhonySample>(line.trim())
-            .expect("Unable to read record from stdin");
-        let problem = PhonyProblem::new(&record).expect("Unable to build problem");
-        match runner.run_problem(&problem) {
-            Ok(mask) => {
-                if only_mode {
-                    for span in mask.iter().spans(|c| *c) {
-                        let phone = line
-                            .chars()
-                            .skip(span.start)
-                            .take(span.end - span.start)
-                            .collect::<String>();
-                        println!("{}", phone);
-                    }
-                } else {
-                    let mask_text = mask
-                        .iter()
-                        .map(|c| if *c { '^' } else { ' ' })
-                        .collect::<String>();
-                    println!("{}", line);
-                    println!("{}", mask_text);
-                }
+        let line = line?;
+        let record = serde_json::from_str::<PhonySample>(line.trim())?;
+        let problem = PhonyProblem::new(&record)?;
+        let mask = runner.run_problem(&problem)?;
+        if only_mode {
+            for span in mask.iter().spans(|c| *c) {
+                let phone = line
+                    .chars()
+                    .skip(span.start)
+                    .take(span.end - span.start)
+                    .collect::<String>();
+                println!("{}", phone);
             }
-            Err(e) => {
-                eprintln!("{}", e);
-                exit(1);
-            }
+        } else {
+            let mask_text = mask
+                .iter()
+                .map(|c| if *c { '^' } else { ' ' })
+                .collect::<String>();
+            println!("{}", line);
+            println!("{}", mask_text);
         }
     }
+    Ok(())
 }
 
 struct PhonyProblem<'a> {
@@ -165,7 +162,9 @@ impl<'a> PhonyProblem<'a> {
         let mut mask2d = Array2::<f32>::zeros((ngrams, Self::WINDOW));
 
         for (i, mut row) in mask2d.genrows_mut().into_iter().enumerate() {
-            row.assign(&mask1d.slice(s![i..i + Self::WINDOW]));
+            let from = i;
+            let to = i + Self::WINDOW;
+            row.assign(&mask1d.slice(s![from..to]));
         }
 
         mask2d
@@ -218,7 +217,7 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
         result
     }
 
-    fn output(&self, tensors: Array2<Self::TensorOutputType>) -> Vec<bool> {
+    fn output(&self, tensors: Array2<Self::TensorOutputType>) -> Self::Output {
         let mut mask = vec![Accumulator(0, 0); self.chars.len()];
         let character_length = self.chars.len() - self.left_padding - self.right_padding;
 
@@ -348,6 +347,7 @@ where
 mod tests {
 
     use super::*;
+    use ndarray::arr2;
 
     #[test]
     fn text_segmentate() {
