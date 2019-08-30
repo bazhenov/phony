@@ -38,6 +38,6 @@ private/input.ndjson: private/sq.ndjson
 	cat private/sq.ndjson | jq -c '{text: .text, spans: (.spans | map([.start, .end]))}' > $@
 
 private/input.hdf5: private/input.ndjson
-	cat private/input.ndjson | head -10 | serve export -o $@
+	cat private/input.ndjson | head -100000 | serve export -o $@
 
 .PHONY: build learn test ipython

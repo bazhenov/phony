@@ -127,7 +127,7 @@ struct PhonyProblem<'a> {
 }
 
 impl<'a> PhonyProblem<'a> {
-    const WINDOW: usize = 16;
+    const WINDOW: usize = 64;
 
     fn new(sample: &'a PhonySample) -> Result<Self, Box<dyn Error>> {
         if let Some((left_padding, padded_string, right_padding)) =
