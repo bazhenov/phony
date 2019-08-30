@@ -67,7 +67,7 @@ fn export_features(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     for (line_no, json) in stdin().lock().lines().enumerate() {
         let json = json?;
         let record = serde_json::from_str::<PhonySample>(json.trim())
-            .expect(&format!("Unable to prase JSON on line {}", line_no));
+            .unwrap_or_else(|_| panic!("Unable to prase JSON on line {}", line_no));
         let problem = PhonyProblem::new(&record)?;
         let example_id = format!("{}", line_no);
 
@@ -347,7 +347,6 @@ where
 mod tests {
 
     use super::*;
-    use ndarray::arr2;
 
     #[test]
     fn text_segmentate() {
@@ -413,13 +412,14 @@ mod tests {
         let p = PhonyProblem::new(&example).unwrap();
 
         let truth = p.ground_truth();
-        assert_eq!(p.left_padding, 6);
-        assert_eq!(p.right_padding, 6);
+        assert_eq!(p.left_padding, 30);
+        assert_eq!(p.right_padding, 30);
         // Индексы в маске смещены из за padding'а. Это необходимо учитывать при изменений ширины окна
-        assert_eq!(
-            truth,
-            arr2(&[[0., 0., 0., 0., 0., 0., 1., 0., 1., 1., 0., 0., 0., 0., 0., 0.,]])
-        );
+        let mut expected = Array2::zeros((1, 64));
+        expected[[0, p.left_padding]] = 1.;
+        expected[[0, p.left_padding + 2]] = 1.;
+        expected[[0, p.left_padding + 3]] = 1.;
+        assert_eq!(truth, expected);
         //assert_eq!(p.output(truth), vec![(0, 1), (2, 4)]);
     }
 }
