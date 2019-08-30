@@ -9,7 +9,7 @@ pub mod tf_problem;
 use clap::{App, ArgMatches, SubCommand};
 use std::env;
 
-use ndarray::{Array1, Array2};
+use ndarray::{stack, Array, Array1, Array2, ArrayBase, Axis, RemoveAxis};
 use std::error::Error;
 use std::io::{stdin, BufRead};
 use std::ops::Range;
@@ -63,28 +63,55 @@ fn export_features(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     let file = File::open(file, "w")?;
     let input_group = file.create_group("input")?;
     let output_group = file.create_group("output")?;
+    let mut segment_index = 0usize..;
+    let mut segment_input = vec![];
+    let mut segment_output = vec![];
+
+    const MAX_SEGMENT_SIZE: usize = 10000;
+
+    let mut current_segment_size = 0usize;
 
     for (line_no, json) in stdin().lock().lines().enumerate() {
         let json = json?;
         let record = serde_json::from_str::<PhonySample>(json.trim())
             .unwrap_or_else(|_| panic!("Unable to prase JSON on line {}", line_no));
         let problem = PhonyProblem::new(&record)?;
-        let example_id = format!("{}", line_no);
 
         let features = problem.features();
-        input_group
-            .new_dataset::<f32>()
-            .create(&example_id, features.dim())
-            .and_then(|dataset| dataset.write(features.slice(s![.., ..])))?;
-
         let ground_truth = problem.ground_truth();
-        output_group
-            .new_dataset::<f32>()
-            .create(&example_id, ground_truth.dim())
-            .and_then(|dataset| dataset.write(ground_truth.slice(s![.., ..])))?;
+
+        current_segment_size += features.dim().0;
+        if current_segment_size > MAX_SEGMENT_SIZE {
+            // Flushing segment to the HDF5
+            let segment_index = segment_index.next().unwrap();
+
+            let s = stack_segment(&segment_input[..]);
+            input_group
+                .new_dataset::<f32>()
+                .create(&format!("{}", segment_index), s.dim())
+                .and_then(|dataset| dataset.write(s.view()))?;
+
+            let s = stack_segment(&segment_output[..]);
+            output_group
+                .new_dataset::<f32>()
+                .create(&format!("{}", segment_index), s.dim())
+                .and_then(|dataset| dataset.write(s.view()))?;
+
+            current_segment_size = features.dim().0;
+            segment_input.clear();
+            segment_output.clear();
+        }
+
+        segment_input.push(features);
+        segment_output.push(ground_truth);
     }
 
     Ok(())
+}
+
+fn stack_segment<T: Copy, D: RemoveAxis>(input: &[Array<T, D>]) -> Array<T, D> {
+    let views = input.iter().map(ArrayBase::view).collect::<Vec<_>>();
+    stack(Axis(0), &views).expect("Invalid array shape")
 }
 
 fn inference(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
@@ -421,5 +448,16 @@ mod tests {
         expected[[0, p.left_padding + 3]] = 1.;
         assert_eq!(truth, expected);
         //assert_eq!(p.output(truth), vec![(0, 1), (2, 4)]);
+    }
+
+    #[test]
+    fn shoud_be_able_to_stack() {
+        use ndarray::arr2;
+
+        let a = arr2(&[[1, 2], [3, 4]]);
+        let b = arr2(&[[5, 6], [7, 8]]);
+
+        let r = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]);
+        println!("{:?}", r);
     }
 }

@@ -87,8 +87,8 @@ if __name__ == "__main__":
 
   print("Reading samples...")
   h5 = h5py.File(options.filename)
-  X = None
-  Y = None
+  X = []
+  Y = []
   i = 0
   while True:
     input_key = "input/" + str(i)
@@ -97,18 +97,14 @@ if __name__ == "__main__":
     if input_key not in h5 or output_key not in h5:
       break
     
-    x = h5[input_key]
-    y = h5[output_key]
-
-    if i == 0:
-      # First example
-      X = h5[input_key]
-      Y = h5[output_key]
-    else:
-      X = np.append(X, x, axis=0)
-      Y = np.append(Y, y, axis=0)
+    X.append(h5[input_key])
+    Y.append(h5[output_key])
     i += 1
+
   print("%d samples read" % i)
+  
+  X = np.vstack(X)
+  Y = np.vstack(Y)
   print("X shape = %s, Y shape = %s" % (str(X.shape), str(Y.shape)))
 
   tensorboard_callback = callbacks.TensorBoard(log_dir='./tensorboard', histogram_freq=0, batch_size=32,
