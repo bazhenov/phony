@@ -23,18 +23,21 @@ ipython:
 	$(docker-run) -it $(jupyter-container) ipython
 
 # Learns the model
-learn: private/input.ndjson
-	$(docker-run) -t $(mount-private) $(gpu-flags) $(phony-container) /learn.py -f input.ndjson -o ./model -e $(epochs) \
+learn: private/input.hdf5
+	$(docker-run) -t $(mount-private) $(gpu-flags) $(phony-container) /learn.py -f input.hdf5 -o ./model -e $(epochs) \
 		-v 0.05
 
 # Builds a docker container with phony
-build:
+docker:
 	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1 learn
 
-build-gpu:
+docker-gpu:
 	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1-gpu learn
 
 private/input.ndjson: private/sq.ndjson
 	cat private/sq.ndjson | jq -c '{text: .text, spans: (.spans | map([.start, .end]))}' > $@
+
+private/input.hdf5: private/input.ndjson
+	cat private/input.ndjson | head -10 | serve export -o $@
 
 .PHONY: build learn test ipython

@@ -9,6 +9,7 @@ import json
 from optparse import OptionParser
 import array
 import fileinput
+import h5py
 
 def stdin():
   for line in fileinput.input():
@@ -79,21 +80,36 @@ if __name__ == "__main__":
   parser.add_option("-v", "--validation", dest="validation", type="float", default=0.1, help="Validation split ratio")
 
   (options, args) = parser.parse_args()
-
-  inp = file(options.filename) if options.filename != None else stdin()
   
   print("Building model...")
   model = build_model()
   model.summary()
 
   print("Reading samples...")
-  X = []
-  Y = []
-  for sample in read_json(inp):
-    (x, y) = json2vec(sample)
-    X.append(x)
-    Y.append(y)
+  h5 = h5py.File(options.filename)
+  X = None
+  Y = None
+  i = 0
+  while True:
+    input_key = "input/" + str(i)
+    output_key = "output/" + str(i)
 
+    if input_key not in h5 or output_key not in h5:
+      break
+    
+    x = h5[input_key]
+    y = h5[output_key]
+
+    if i == 0:
+      # First example
+      X = h5[input_key]
+      Y = h5[output_key]
+    else:
+      X = np.append(X, x, axis=0)
+      Y = np.append(Y, y, axis=0)
+    i += 1
+  print("%d samples read" % i)
+  print("X shape = %s, Y shape = %s" % (str(X.shape), str(Y.shape)))
 
   tensorboard_callback = callbacks.TensorBoard(log_dir='./tensorboard', histogram_freq=0, batch_size=32,
           write_graph=True, write_grads=False, write_images=False, embeddings_freq=0,
