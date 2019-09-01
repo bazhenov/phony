@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-type CharacterSpan = (usize, usize);
+pub type CharacterSpan = (usize, usize);
 
 /// Запись (кортеж) используемая для хранения информации о примере, а также (опционально) пометку примера
 /// и ответ системы.

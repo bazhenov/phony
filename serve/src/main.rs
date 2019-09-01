@@ -16,7 +16,7 @@ use std::ops::Range;
 use std::process::exit;
 use tf_problem::{TensorflowProblem, TensorflowRunner};
 
-use sample::PhonySample;
+use sample::{CharacterSpan, PhonySample};
 
 use encoding::all::WINDOWS_1251;
 use encoding::{EncoderTrap, Encoding};
@@ -29,10 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .subcommand(
             SubCommand::with_name("inference")
                 .about("run inference over examples from stdin")
-                .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'")
-                .arg_from_usage(
-                    "[only_mode] -o, --only 'Print only matched characters from phone'",
-                ),
+                .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'"),
         )
         .subcommand(
             SubCommand::with_name("export")
@@ -117,30 +114,19 @@ fn stack_segment<T: Copy, D: RemoveAxis>(input: &[Array<T, D>]) -> Array<T, D> {
 fn inference(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
     let model_path = matches.value_of("model").unwrap();
-    let only_mode = matches.is_present("only_mode");
 
     let runner = TensorflowRunner::create_session(model_path)?;
     for line in stdin().lock().lines() {
         let line = line?;
         let record = serde_json::from_str::<PhonySample>(line.trim())?;
         let problem = PhonyProblem::new(&record)?;
-        let mask = runner.run_problem(&problem)?;
-        if only_mode {
-            for span in mask.iter().spans(|c| *c) {
-                let phone = line
-                    .chars()
-                    .skip(span.start)
-                    .take(span.end - span.start)
-                    .collect::<String>();
-                println!("{}", phone);
-            }
-        } else {
-            let mask_text = mask
-                .iter()
-                .map(|c| if *c { '^' } else { ' ' })
+        for span in runner.run_problem(&problem)? {
+            let phone = line
+                .chars()
+                .skip(span.0)
+                .take(span.1 - span.0)
                 .collect::<String>();
-            println!("{}", line);
-            println!("{}", mask_text);
+            println!("{}", phone);
         }
     }
     Ok(())
@@ -228,7 +214,7 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
     type TensorInputType = f32;
     type TensorOutputType = f32;
     type Input = PhonySample;
-    type Output = Vec<bool>;
+    type Output = Vec<CharacterSpan>;
     const GRAPH_INPUT_NAME: &'static str = "input";
     const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
 
@@ -260,6 +246,8 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
             // отрезаем от маски "хвостики" порожденные padding'ом строки
             .skip(self.left_padding)
             .take(character_length)
+            .spans(|c| c)
+            .map(|r| (r.start, r.end))
             .collect()
     }
 }
