@@ -11,7 +11,8 @@ use std::env;
 
 use ndarray::{stack, Array, Array1, Array2, ArrayBase, Axis, RemoveAxis};
 use std::error::Error;
-use std::io::{stdin, BufRead};
+use std::fs::File;
+use std::io::{stdin, BufRead, BufReader, Write};
 use std::ops::Range;
 use std::process::exit;
 use tf_problem::{TensorflowProblem, TensorflowRunner};
@@ -32,6 +33,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'"),
         )
         .subcommand(
+            SubCommand::with_name("inference-file")
+                .about("run inference over examples from file and update file in place")
+                .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'")
+                .arg_from_usage("<input_file> -i, --input=[FILE] 'File with examples'")
+                .arg_from_usage(
+                    "<output_file> -o, --output=[FILE] 'Output file with processed examples'",
+                ),
+        )
+        .subcommand(
             SubCommand::with_name("export")
                 .about("export features learning data in HDF5 format")
                 .arg_from_usage("<file> -o, --output=[FILE] 'Output file'"),
@@ -40,6 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match matches.subcommand() {
         ("inference", Some(matches)) => inference(&matches),
+        ("inference-file", Some(matches)) => inference_and_update_file(&matches),
         ("export", Some(matches)) => export_features(&matches),
         _ => {
             eprintln!("{}", matches.usage());
@@ -120,7 +131,8 @@ fn inference(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         let line = line?;
         let record = serde_json::from_str::<PhonySample>(line.trim())?;
         let problem = PhonyProblem::new(&record)?;
-        for span in runner.run_problem(&problem)? {
+        let spans = runner.run_problem(&problem)?;
+        for span in spans {
             let phone = line
                 .chars()
                 .skip(span.0)
@@ -128,6 +140,28 @@ fn inference(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
                 .collect::<String>();
             println!("{}", phone);
         }
+    }
+    Ok(())
+}
+
+fn inference_and_update_file(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+    env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
+    let model_path = matches.value_of("model").unwrap();
+    let input_file = matches.value_of("input_file").unwrap();
+    let output_file = matches.value_of("output_file").unwrap();
+    let input = BufReader::new(File::open(input_file)?);
+    let mut output = File::create(output_file)?;
+
+    let runner = TensorflowRunner::create_session(model_path)?;
+    for line in input.lines() {
+        let line = line?;
+        let mut record = serde_json::from_str::<PhonySample>(line.trim())?;
+        let problem = PhonyProblem::new(&record)?;
+        let spans = runner.run_problem(&problem)?;
+        record.prediction = Some(spans);
+        let bytes = serde_json::to_vec(&record)?;
+        output.write_all(&bytes)?;
+        writeln!(output)?;
     }
     Ok(())
 }
