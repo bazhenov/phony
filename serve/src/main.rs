@@ -3,8 +3,11 @@ extern crate tensorflow;
 #[macro_use(s)]
 extern crate ndarray;
 
+pub mod phony;
 pub mod sample;
 pub mod tf_problem;
+
+use phony::{EvaluationMetric, MucMetric};
 
 use clap::{App, ArgMatches, SubCommand};
 use std::env;
@@ -46,11 +49,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .about("export features learning data in HDF5 format")
                 .arg_from_usage("<file> -o, --output=[FILE] 'Output file'"),
         )
+        .subcommand(
+            SubCommand::with_name("eval")
+                .about("evaluate result using file with inference results")
+                .arg_from_usage("<file> [FILE] 'Inference file'"),
+        )
         .get_matches();
 
     match matches.subcommand() {
         ("inference", Some(matches)) => inference(&matches),
         ("inference-file", Some(matches)) => inference_and_update_file(&matches),
+        ("eval", Some(matches)) => evaluate_results(&matches),
         ("export", Some(matches)) => export_features(&matches),
         _ => {
             eprintln!("{}", matches.usage());
@@ -163,6 +172,25 @@ fn inference_and_update_file(matches: &ArgMatches) -> Result<(), Box<dyn Error>>
         output.write_all(&bytes)?;
         writeln!(output)?;
     }
+    Ok(())
+}
+
+fn evaluate_results(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+    let input_file = matches.value_of("file").unwrap();
+    let input = BufReader::new(File::open(input_file)?);
+
+    let mut metric = MucMetric::new();
+    for line in input.lines() {
+        let line = line?;
+        let record = serde_json::from_str::<PhonySample>(line.trim())?;
+        if let Some(label) = record.label {
+            if let Some(prediction) = record.prediction {
+                metric.feed(&label, &prediction);
+            }
+        }
+    }
+
+    println!("{}", metric);
     Ok(())
 }
 

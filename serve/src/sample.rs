@@ -19,6 +19,10 @@ pub struct Record<X, Y> {
 
 pub type PhonySample = Record<String, Vec<CharacterSpan>>;
 
+pub fn does_spans_intersects(a: CharacterSpan, b: CharacterSpan) -> bool {
+    (b.0 >= a.0 && b.0 < a.1) || (a.0 >= b.0 && a.0 < b.1)
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -57,5 +61,17 @@ mod tests {
         assert_eq!(record.sample, "Первый: 1, второй: 2");
         assert_eq!(record.label, Some(vec![(8, 9), (19, 20)]));
         assert_eq!(record.prediction, Some(vec![(1, 2), (3, 5)]));
+    }
+
+    #[test]
+    fn spans_can_be_tested_for_intersection() {
+        assert_eq!(does_spans_intersects((0, 1), (1, 2)), false);
+        assert_eq!(does_spans_intersects((1, 2), (0, 1)), false);
+
+        assert_eq!(does_spans_intersects((0, 2), (1, 2)), true);
+        assert_eq!(does_spans_intersects((1, 2), (0, 2)), true);
+
+        assert_eq!(does_spans_intersects((1, 10), (2, 3)), true);
+        assert_eq!(does_spans_intersects((2, 3), (1, 10)), true);
     }
 }
