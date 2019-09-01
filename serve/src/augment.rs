@@ -508,7 +508,7 @@ mod tests {
         assert_eq!(record.label, Some(vec![(8, 9), (19, 20)]));
 
         let json = serde_json::to_string(&record).unwrap();
-        let expected = r#"{"text":"Первый: 1, второй: 2","spans":[[8,9],[19,20]]}"#;
+        let expected = r#"{"sample":"Первый: 1, второй: 2","label":[[8,9],[19,20]]}"#;
         assert_eq!(json, expected)
     }
 }

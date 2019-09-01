@@ -9,7 +9,11 @@ type CharacterSpan = (usize, usize);
 #[derive(Serialize, Deserialize)]
 pub struct Record<X, Y> {
     pub sample: X,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<Y>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prediction: Option<Y>,
 }
 
