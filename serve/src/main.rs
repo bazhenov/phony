@@ -1,75 +1,201 @@
 extern crate encoding;
 extern crate tensorflow;
+#[macro_use(s)]
+extern crate ndarray;
 
+pub mod sample;
 pub mod tf_problem;
 
-use clap::App;
+use clap::{App, ArgMatches, SubCommand};
 use std::env;
 
-use ndarray::Array2;
+use ndarray::{stack, Array, Array1, Array2, ArrayBase, Axis, RemoveAxis};
 use std::error::Error;
 use std::io::{stdin, BufRead};
 use std::ops::Range;
 use std::process::exit;
 use tf_problem::{TensorflowProblem, TensorflowRunner};
 
+use sample::PhonySample;
+
 use encoding::all::WINDOWS_1251;
 use encoding::{EncoderTrap, Encoding};
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let matches = App::new("phony-serve")
         .author("Denis Bazhenov <dotsid@gmail.com>")
         .version("1.0.0")
         .about("CLI utility for phony classification problem")
-        .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'")
-        .arg_from_usage("[only_mode] -o, --only 'Print only matched characters from phone'")
+        .subcommand(
+            SubCommand::with_name("inference")
+                .about("run inference over examples from stdin")
+                .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'")
+                .arg_from_usage(
+                    "[only_mode] -o, --only 'Print only matched characters from phone'",
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("export")
+                .about("export features learning data in HDF5 format")
+                .arg_from_usage("<file> -o, --output=[FILE] 'Output file'"),
+        )
         .get_matches();
 
-    env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
-    let model_path = matches.value_of("model").unwrap();
-    let only_mode = matches.is_present("only_mode");
-
-    if let Ok(runner) = TensorflowRunner::create_session(model_path) {
-        for line in stdin().lock().lines() {
-            let line = line.expect("Unable to read line");
-            let line = line.trim();
-            match runner.run_problem::<PhonyProblem>(line) {
-                Ok(mask) => {
-                    if only_mode {
-                        for span in mask.iter().spans(|c| *c) {
-                            let phone = line
-                                .chars()
-                                .skip(span.start)
-                                .take(span.end - span.start)
-                                .collect::<String>();
-                            println!("{}", phone);
-                        }
-                    } else {
-                        let mask_text = mask
-                            .iter()
-                            .map(|c| if *c { '^' } else { ' ' })
-                            .collect::<String>();
-                        println!("{}", line);
-                        println!("{}", mask_text);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    exit(1);
-                }
-            }
+    match matches.subcommand() {
+        ("inference", Some(matches)) => inference(&matches),
+        ("export", Some(matches)) => export_features(&matches),
+        _ => {
+            eprintln!("{}", matches.usage());
+            exit(1);
         }
     }
 }
 
-struct PhonyProblem {
+// Срабатывает deref_addrof на макрос s![.., ..]. Не смог разобраться как исправить,
+// поэтому отключил. Рекомендация использовать s![.., ..] есть в официальной документации
+// ndarray.
+// см. https://rust-lang.github.io/rust-clippy/master/index.html#deref_addrof
+#[allow(clippy::deref_addrof)]
+fn export_features(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+    use hdf5::File;
+
+    let file = matches.value_of("file").unwrap();
+    let file = File::open(file, "w")?;
+    let input_group = file.create_group("input")?;
+    let output_group = file.create_group("output")?;
+    let mut segment_index = 0usize..;
+    let mut segment_input = vec![];
+    let mut segment_output = vec![];
+
+    const MAX_SEGMENT_SIZE: usize = 10000;
+
+    let mut current_segment_size = 0usize;
+
+    for (line_no, json) in stdin().lock().lines().enumerate() {
+        let json = json?;
+        let record = serde_json::from_str::<PhonySample>(json.trim())
+            .unwrap_or_else(|_| panic!("Unable to prase JSON on line {}", line_no));
+        let problem = PhonyProblem::new(&record)?;
+
+        let features = problem.features();
+        let ground_truth = problem.ground_truth();
+
+        current_segment_size += features.dim().0;
+        if current_segment_size > MAX_SEGMENT_SIZE {
+            // Flushing segment to the HDF5
+            let segment_index = segment_index.next().unwrap();
+
+            let s = stack_segment(&segment_input[..]);
+            input_group
+                .new_dataset::<f32>()
+                .create(&format!("{}", segment_index), s.dim())
+                .and_then(|dataset| dataset.write(s.view()))?;
+
+            let s = stack_segment(&segment_output[..]);
+            output_group
+                .new_dataset::<f32>()
+                .create(&format!("{}", segment_index), s.dim())
+                .and_then(|dataset| dataset.write(s.view()))?;
+
+            current_segment_size = features.dim().0;
+            segment_input.clear();
+            segment_output.clear();
+        }
+
+        segment_input.push(features);
+        segment_output.push(ground_truth);
+    }
+
+    Ok(())
+}
+
+fn stack_segment<T: Copy, D: RemoveAxis>(input: &[Array<T, D>]) -> Array<T, D> {
+    let views = input.iter().map(ArrayBase::view).collect::<Vec<_>>();
+    stack(Axis(0), &views).expect("Invalid array shape")
+}
+
+fn inference(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+    env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
+    let model_path = matches.value_of("model").unwrap();
+    let only_mode = matches.is_present("only_mode");
+
+    let runner = TensorflowRunner::create_session(model_path)?;
+    for line in stdin().lock().lines() {
+        let line = line?;
+        let record = serde_json::from_str::<PhonySample>(line.trim())?;
+        let problem = PhonyProblem::new(&record)?;
+        let mask = runner.run_problem(&problem)?;
+        if only_mode {
+            for span in mask.iter().spans(|c| *c) {
+                let phone = line
+                    .chars()
+                    .skip(span.start)
+                    .take(span.end - span.start)
+                    .collect::<String>();
+                println!("{}", phone);
+            }
+        } else {
+            let mask_text = mask
+                .iter()
+                .map(|c| if *c { '^' } else { ' ' })
+                .collect::<String>();
+            println!("{}", line);
+            println!("{}", mask_text);
+        }
+    }
+    Ok(())
+}
+
+struct PhonyProblem<'a> {
     chars: Vec<u8>,
     left_padding: usize,
     right_padding: usize,
+    sample: &'a PhonySample,
 }
 
-impl PhonyProblem {
-    const WINDOW: usize = 16;
+impl<'a> PhonyProblem<'a> {
+    const WINDOW: usize = 64;
+
+    fn new(sample: &'a PhonySample) -> Result<Self, Box<dyn Error>> {
+        if let Some((left_padding, padded_string, right_padding)) =
+            Self::pad_string(&sample.text, Self::WINDOW)
+        {
+            Ok(PhonyProblem {
+                chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
+                left_padding,
+                right_padding,
+                sample,
+            })
+        } else {
+            Ok(PhonyProblem {
+                chars: WINDOWS_1251.encode(&sample.text, EncoderTrap::Strict)?,
+                left_padding: 0,
+                right_padding: 0,
+                sample,
+            })
+        }
+    }
+
+    fn ground_truth(&self) -> Array2<f32> {
+        let mut mask1d = Array1::<f32>::zeros(self.chars.len());
+
+        for span in &self.sample.spans {
+            let from = self.left_padding + span.0;
+            let to = self.left_padding + span.1;
+            mask1d.slice_mut(s![from..to]).fill(1.);
+        }
+
+        let ngrams = self.chars.len() - Self::WINDOW + 1;
+        let mut mask2d = Array2::<f32>::zeros((ngrams, Self::WINDOW));
+
+        for (i, mut row) in mask2d.genrows_mut().into_iter().enumerate() {
+            let from = i;
+            let to = i + Self::WINDOW;
+            row.assign(&mask1d.slice(s![from..to]));
+        }
+
+        mask2d
+    }
 
     fn pad_string(string: &str, desired_length: usize) -> Option<(usize, String, usize)> {
         let char_length = string.chars().count();
@@ -96,33 +222,15 @@ impl PhonyProblem {
     }
 }
 
-impl TensorflowProblem for PhonyProblem {
+impl<'a> TensorflowProblem for PhonyProblem<'a> {
     type TensorInputType = f32;
     type TensorOutputType = f32;
-    type Input = str;
+    type Input = PhonySample;
     type Output = Vec<bool>;
     const GRAPH_INPUT_NAME: &'static str = "input";
     const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
 
-    fn new_context(example: &Self::Input) -> Result<Self, Box<dyn Error>> {
-        if let Some((left_padding, padded_string, right_padding)) =
-            Self::pad_string(example, Self::WINDOW)
-        {
-            Ok(PhonyProblem {
-                chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
-                left_padding,
-                right_padding,
-            })
-        } else {
-            Ok(PhonyProblem {
-                chars: WINDOWS_1251.encode(example, EncoderTrap::Strict)?,
-                left_padding: 0,
-                right_padding: 0,
-            })
-        }
-    }
-
-    fn tensors_from_example(&self, _e: &Self::Input) -> Array2<Self::TensorInputType> {
+    fn features(&self) -> Array2<Self::TensorInputType> {
         let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
 
         let mut result = Array2::zeros((ngrams.len(), Self::WINDOW));
@@ -136,11 +244,7 @@ impl TensorflowProblem for PhonyProblem {
         result
     }
 
-    fn output_from_tensors(
-        &self,
-        _example: &Self::Input,
-        tensors: Array2<Self::TensorOutputType>,
-    ) -> Vec<bool> {
+    fn output(&self, tensors: Array2<Self::TensorOutputType>) -> Self::Output {
         let mut mask = vec![Accumulator(0, 0); self.chars.len()];
         let character_length = self.chars.len() - self.left_padding - self.right_padding;
 
@@ -324,5 +428,36 @@ mod tests {
         assert_eq!(spans[0], 0..2);
         assert_eq!(spans[1], 3..5);
         assert_eq!(spans[2], 8..9);
+    }
+
+    #[test]
+    fn should_be_able_to_reconstruct_ground_truth_labels() {
+        let example = PhonySample {
+            text: String::from("text"),
+            spans: vec![(0, 1), (2, 4)],
+        };
+        let p = PhonyProblem::new(&example).unwrap();
+
+        let truth = p.ground_truth();
+        assert_eq!(p.left_padding, 30);
+        assert_eq!(p.right_padding, 30);
+        // Индексы в маске смещены из за padding'а. Это необходимо учитывать при изменений ширины окна
+        let mut expected = Array2::zeros((1, 64));
+        expected[[0, p.left_padding]] = 1.;
+        expected[[0, p.left_padding + 2]] = 1.;
+        expected[[0, p.left_padding + 3]] = 1.;
+        assert_eq!(truth, expected);
+        //assert_eq!(p.output(truth), vec![(0, 1), (2, 4)]);
+    }
+
+    #[test]
+    fn shoud_be_able_to_stack() {
+        use ndarray::arr2;
+
+        let a = arr2(&[[1, 2], [3, 4]]);
+        let b = arr2(&[[5, 6], [7, 8]]);
+
+        let r = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]);
+        println!("{:?}", r);
     }
 }

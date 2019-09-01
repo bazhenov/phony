@@ -41,36 +41,18 @@ pub trait TensorflowProblem {
     /// Имя выходного слоя в вычислительном графе tensorflow
     const GRAPH_OUTPUT_NAME: &'static str;
 
-    /// Создает контекст из входного примера.
-    ///
-    /// Контекст – абстракция позволяющая решить две задачи:
-    /// * определить логику конвертации и предварительной обработки примера в вид более удобный для конвертации
-    /// в тензор. Это позволяет упростить реализацию метода `tensors_from_example`. Это бывает полезно когда
-    /// из одного примера необходимо генерировать несколько тензоров. Вынос предварительных вычислений
-    /// в контекст позволяет избежать дублирующих вычислений;
-    /// * сохранить информацию необходимую для интерпретации ответа вычислительного графа. Контекст доступен как
-    /// в методу `tensors_from_example` так и методу `output_from_tensors`. Поэтому, его удобно использовать
-    /// когда ответ вычислительного графа не является самостоятельгым и требует дальнейшей интерпретации на основании
-    /// входных данных.
-    fn new_context(example: &Self::Input) -> Result<Self, Box<dyn Error>>
-    where
-        Self: Sized;
-
-    /// Формирует из примера тензор, который в последствии будет играть роль входных данных для tensorflow-графа.
+    /// Формирует из примера тензор признаков, который в последствии будет играть роль входных данных для
+    /// tensorflow-графа.
     ///
     /// Тензор возвращаемый из этого метода по своей форме должен быть совместим с placeholder'ом вычислительного
     /// графа указанным в константе `GRAPH_INPUT_NAME`.
-    fn tensors_from_example(&self, example: &Self::Input) -> Array2<Self::TensorInputType>;
+    fn features(&self) -> Array2<Self::TensorInputType>;
 
     /// Формирует ответ системы на основании вычислений tensorflow.
     ///
     /// Принимает исходный пример, а также тензор из слоя указанного в `GRAPH_OUTPUT_NAME`. На основании этой
     /// информации формирует конечный ответ на задачу целиком.
-    fn output_from_tensors(
-        &self,
-        example: &Self::Input,
-        tensor: Array2<Self::TensorOutputType>,
-    ) -> Self::Output;
+    fn output(&self, tensor: Array2<Self::TensorOutputType>) -> Self::Output;
 
     fn retrieve_input_output(&self, graph: &Graph) -> tf::Result<(Operation, Operation)> {
         let input = graph.operation_by_name_required(Self::GRAPH_INPUT_NAME)?;
@@ -141,19 +123,18 @@ impl TensorflowRunner {
 
     pub fn run_problem<P: TensorflowProblem>(
         &self,
-        example: &P::Input,
+        problem: &P,
     ) -> Result<P::Output, Box<dyn Error>> {
-        let problem = P::new_context(&example)?;
         let (input_op, output_op) = problem.retrieve_input_output(&self.graph)?;
 
-        let inputs = problem.tensors_from_example(&example);
+        let inputs = problem.features();
         assert!(inputs.is_standard_layout(), "ndarray should be in standard (row-major) layout. Make sure you doesn't use ShapeBuilder::f() method when creating tensors");
 
         let tensor = tensor_from_ndarray(inputs);
         let output = problem
             .feed(&self.session, &input_op, &output_op, &tensor)
             .map(ndarray_from_tensor)
-            .map(|output| problem.output_from_tensors(&example, output))?;
+            .map(|tensor| problem.output(tensor))?;
 
         Ok(output)
     }
