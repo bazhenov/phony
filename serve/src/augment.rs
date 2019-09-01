@@ -3,14 +3,15 @@ extern crate clap;
 
 mod digits;
 mod numerate;
+mod phony;
 mod sample;
 
 use clap::App;
 use digits::Digits;
 use numerate::numerate;
+use phony::PhonySample;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use sample::PhonySample;
 use std::collections::HashMap;
 use std::io::{stdin, stdout, BufRead};
 
@@ -39,12 +40,50 @@ fn main() {
         for line in stdin().lock().lines() {
             let line = line.expect("Unable to read");
             for _ in 0..count {
-                let sample = PhonySample::augment(&line, &mut generator);
+                let sample = augment(&line, &mut generator);
                 serde_json::to_writer(stdout(), &sample).expect("Unable to write json");
                 println!();
             }
         }
     }
+}
+
+pub fn augment<T: AsRef<str>>(
+    message: &str,
+    values: &mut impl Iterator<Item = T>,
+) -> Option<PhonySample> {
+    let mut text = String::with_capacity(message.len());
+    let mut offset_chars = 0;
+    let mut span = message;
+    let pattern = "<PHONE>";
+    let mut spans = vec![];
+
+    while let Some(match_offset) = span.find(pattern) {
+        offset_chars += span[..match_offset].chars().count();
+        text.push_str(&span[..match_offset]);
+        if let Some(n) = values.next() {
+            let replacement = n.as_ref();
+            let replacement_chars_length = replacement.chars().count();
+            spans.push((offset_chars, offset_chars + replacement_chars_length));
+            text.push_str(replacement);
+
+            offset_chars += replacement_chars_length;
+        } else {
+            return None;
+        }
+
+        span = &span[match_offset + pattern.len()..];
+    }
+
+    if !span.is_empty() {
+        text.push_str(span);
+    }
+
+    Some(PhonySample {
+        sample: text,
+        label: Some(spans),
+        prediction: None,
+    })
 }
 
 fn prepare_generator() -> PhoneGenerator {
@@ -458,5 +497,19 @@ mod tests {
         g.register_postprocessor(1, Box::new(PlusSevenPostProcessingRule));
 
         println!("{}", g.generate_random());
+    }
+
+    #[test]
+    fn test_create_augmented_sample() {
+        let text = "Первый: <PHONE>, второй: <PHONE>";
+        let list = vec!["1", "2"];
+        let record = augment(text, &mut list.iter()).unwrap();
+
+        assert_eq!(record.sample, "Первый: 1, второй: 2");
+        assert_eq!(record.label, Some(vec![(8, 9), (19, 20)]));
+
+        let json = serde_json::to_string(&record).unwrap();
+        let expected = r#"{"sample":"Первый: 1, второй: 2","label":[[8,9],[19,20]]}"#;
+        assert_eq!(json, expected)
     }
 }

@@ -3,20 +3,25 @@ extern crate tensorflow;
 #[macro_use(s)]
 extern crate ndarray;
 
+pub mod phony;
+pub mod phony_tf;
 pub mod sample;
 pub mod tf_problem;
+
+use phony_tf::MucMetric;
 
 use clap::{App, ArgMatches, SubCommand};
 use std::env;
 
 use ndarray::{stack, Array, Array1, Array2, ArrayBase, Axis, RemoveAxis};
 use std::error::Error;
-use std::io::{stdin, BufRead};
+use std::fs::File;
+use std::io::{stdin, BufRead, BufReader, Write};
 use std::ops::Range;
 use std::process::exit;
-use tf_problem::{TensorflowProblem, TensorflowRunner};
+use tf_problem::{EvaluationMetric, TensorflowProblem, TensorflowRunner};
 
-use sample::PhonySample;
+use phony::{CharacterSpan, PhonySample};
 
 use encoding::all::WINDOWS_1251;
 use encoding::{EncoderTrap, Encoding};
@@ -29,9 +34,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .subcommand(
             SubCommand::with_name("inference")
                 .about("run inference over examples from stdin")
+                .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'"),
+        )
+        .subcommand(
+            SubCommand::with_name("inference-file")
+                .about("run inference over examples from file and update file in place")
                 .arg_from_usage("<model> -m, --model=[DIRECTORY] 'Sets model directory'")
+                .arg_from_usage("<input_file> -i, --input=[FILE] 'File with examples'")
                 .arg_from_usage(
-                    "[only_mode] -o, --only 'Print only matched characters from phone'",
+                    "<output_file> -o, --output=[FILE] 'Output file with processed examples'",
                 ),
         )
         .subcommand(
@@ -39,10 +50,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .about("export features learning data in HDF5 format")
                 .arg_from_usage("<file> -o, --output=[FILE] 'Output file'"),
         )
+        .subcommand(
+            SubCommand::with_name("eval")
+                .about("evaluate result using file with inference results")
+                .arg_from_usage("<file> [FILE] 'Inference file'"),
+        )
         .get_matches();
 
     match matches.subcommand() {
         ("inference", Some(matches)) => inference(&matches),
+        ("inference-file", Some(matches)) => inference_and_update_file(&matches),
+        ("eval", Some(matches)) => evaluate_results(&matches),
         ("export", Some(matches)) => export_features(&matches),
         _ => {
             eprintln!("{}", matches.usage());
@@ -117,32 +135,63 @@ fn stack_segment<T: Copy, D: RemoveAxis>(input: &[Array<T, D>]) -> Array<T, D> {
 fn inference(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
     let model_path = matches.value_of("model").unwrap();
-    let only_mode = matches.is_present("only_mode");
 
     let runner = TensorflowRunner::create_session(model_path)?;
     for line in stdin().lock().lines() {
         let line = line?;
         let record = serde_json::from_str::<PhonySample>(line.trim())?;
         let problem = PhonyProblem::new(&record)?;
-        let mask = runner.run_problem(&problem)?;
-        if only_mode {
-            for span in mask.iter().spans(|c| *c) {
-                let phone = line
-                    .chars()
-                    .skip(span.start)
-                    .take(span.end - span.start)
-                    .collect::<String>();
-                println!("{}", phone);
-            }
-        } else {
-            let mask_text = mask
-                .iter()
-                .map(|c| if *c { '^' } else { ' ' })
+        let spans = runner.run_problem(&problem)?;
+        for span in spans {
+            let phone = line
+                .chars()
+                .skip(span.0)
+                .take(span.1 - span.0)
                 .collect::<String>();
-            println!("{}", line);
-            println!("{}", mask_text);
+            println!("{}", phone);
         }
     }
+    Ok(())
+}
+
+fn inference_and_update_file(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+    env::set_var("TF_CPP_MIN_LOG_LEVEL", "1");
+    let model_path = matches.value_of("model").unwrap();
+    let input_file = matches.value_of("input_file").unwrap();
+    let output_file = matches.value_of("output_file").unwrap();
+    let input = BufReader::new(File::open(input_file)?);
+    let mut output = File::create(output_file)?;
+
+    let runner = TensorflowRunner::create_session(model_path)?;
+    for line in input.lines() {
+        let line = line?;
+        let mut record = serde_json::from_str::<PhonySample>(line.trim())?;
+        let problem = PhonyProblem::new(&record)?;
+        let spans = runner.run_problem(&problem)?;
+        record.prediction = Some(spans);
+        let bytes = serde_json::to_vec(&record)?;
+        output.write_all(&bytes)?;
+        writeln!(output)?;
+    }
+    Ok(())
+}
+
+fn evaluate_results(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+    let input_file = matches.value_of("file").unwrap();
+    let input = BufReader::new(File::open(input_file)?);
+
+    let mut metric = MucMetric::new();
+    for line in input.lines() {
+        let line = line?;
+        let record = serde_json::from_str::<PhonySample>(line.trim())?;
+        if let Some(label) = record.label {
+            if let Some(prediction) = record.prediction {
+                metric.update(&label, &prediction);
+            }
+        }
+    }
+
+    println!("{}", metric);
     Ok(())
 }
 
@@ -158,7 +207,7 @@ impl<'a> PhonyProblem<'a> {
 
     fn new(sample: &'a PhonySample) -> Result<Self, Box<dyn Error>> {
         if let Some((left_padding, padded_string, right_padding)) =
-            Self::pad_string(&sample.text, Self::WINDOW)
+            Self::pad_string(&sample.sample, Self::WINDOW)
         {
             Ok(PhonyProblem {
                 chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
@@ -168,7 +217,7 @@ impl<'a> PhonyProblem<'a> {
             })
         } else {
             Ok(PhonyProblem {
-                chars: WINDOWS_1251.encode(&sample.text, EncoderTrap::Strict)?,
+                chars: WINDOWS_1251.encode(&sample.sample, EncoderTrap::Strict)?,
                 left_padding: 0,
                 right_padding: 0,
                 sample,
@@ -179,10 +228,12 @@ impl<'a> PhonyProblem<'a> {
     fn ground_truth(&self) -> Array2<f32> {
         let mut mask1d = Array1::<f32>::zeros(self.chars.len());
 
-        for span in &self.sample.spans {
-            let from = self.left_padding + span.0;
-            let to = self.left_padding + span.1;
-            mask1d.slice_mut(s![from..to]).fill(1.);
+        if let Some(spans) = &self.sample.label {
+            for span in spans {
+                let from = self.left_padding + span.0;
+                let to = self.left_padding + span.1;
+                mask1d.slice_mut(s![from..to]).fill(1.);
+            }
         }
 
         let ngrams = self.chars.len() - Self::WINDOW + 1;
@@ -226,7 +277,7 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
     type TensorInputType = f32;
     type TensorOutputType = f32;
     type Input = PhonySample;
-    type Output = Vec<bool>;
+    type Output = Vec<CharacterSpan>;
     const GRAPH_INPUT_NAME: &'static str = "input";
     const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
 
@@ -258,6 +309,8 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
             // отрезаем от маски "хвостики" порожденные padding'ом строки
             .skip(self.left_padding)
             .take(character_length)
+            .spans(|c| c)
+            .map(|r| (r.start, r.end))
             .collect()
     }
 }
@@ -433,8 +486,9 @@ mod tests {
     #[test]
     fn should_be_able_to_reconstruct_ground_truth_labels() {
         let example = PhonySample {
-            text: String::from("text"),
-            spans: vec![(0, 1), (2, 4)],
+            sample: String::from("text"),
+            label: Some(vec![(0, 1), (2, 4)]),
+            prediction: None,
         };
         let p = PhonyProblem::new(&example).unwrap();
 

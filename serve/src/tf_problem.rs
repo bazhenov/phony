@@ -140,6 +140,18 @@ impl TensorflowRunner {
     }
 }
 
+/// This trait defines a contract for implementing custom ML-evaluation metrics.
+///
+/// Basically metric is consuming all pairs of ground truth labels and prediction labels. This trait only
+/// defines contract for updating metric value. The way client get the metric value is implementation specific
+/// and should be documented on a metric type. It may be struct field or using `Display` trait.
+pub trait EvaluationMetric<T: ?Sized> {
+    /// Consuming a pair of truth/prediction labels and updates internal state representing metric value.
+    ///
+    /// In general metric is not required to be symmetric, so pay attention to the order of arguments.
+    fn update(&mut self, truth: &T, prediction: &T);
+}
+
 #[cfg(test)]
 mod tests {
 
