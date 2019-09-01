@@ -27,6 +27,9 @@ learn: private/input.hdf5
 	$(docker-run) -t $(mount-private) $(gpu-flags) $(phony-container) /learn.py -f input.hdf5 -o ./model -e $(epochs) \
 		-v 0.05
 
+private/inference.ndjson: private/input.ndjson
+	serve inference-file -i private/input.ndjson -o $@ --model $(MODEL)
+
 # Builds a docker container with phony
 docker:
 	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1 learn
@@ -35,9 +38,9 @@ docker-gpu:
 	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1-gpu learn
 
 private/input.ndjson: private/sq.ndjson
-	cat private/sq.ndjson | jq -c '{text: .text, spans: (.spans | map([.start, .end]))}' > $@
+	cat private/sq.ndjson | jq -c '{sample: .text, label: (.spans | map([.start, .end]))}' > $@
 
 private/input.hdf5: private/input.ndjson
 	cat private/input.ndjson | head -100000 | serve export -o $@
 
-.PHONY: build learn test ipython
+.PHONY: build learn eval ipython
