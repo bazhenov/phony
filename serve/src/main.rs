@@ -158,7 +158,7 @@ impl<'a> PhonyProblem<'a> {
 
     fn new(sample: &'a PhonySample) -> Result<Self, Box<dyn Error>> {
         if let Some((left_padding, padded_string, right_padding)) =
-            Self::pad_string(&sample.text, Self::WINDOW)
+            Self::pad_string(&sample.sample, Self::WINDOW)
         {
             Ok(PhonyProblem {
                 chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
@@ -168,7 +168,7 @@ impl<'a> PhonyProblem<'a> {
             })
         } else {
             Ok(PhonyProblem {
-                chars: WINDOWS_1251.encode(&sample.text, EncoderTrap::Strict)?,
+                chars: WINDOWS_1251.encode(&sample.sample, EncoderTrap::Strict)?,
                 left_padding: 0,
                 right_padding: 0,
                 sample,
@@ -179,10 +179,12 @@ impl<'a> PhonyProblem<'a> {
     fn ground_truth(&self) -> Array2<f32> {
         let mut mask1d = Array1::<f32>::zeros(self.chars.len());
 
-        for span in &self.sample.spans {
-            let from = self.left_padding + span.0;
-            let to = self.left_padding + span.1;
-            mask1d.slice_mut(s![from..to]).fill(1.);
+        if let Some(spans) = &self.sample.label {
+            for span in spans {
+                let from = self.left_padding + span.0;
+                let to = self.left_padding + span.1;
+                mask1d.slice_mut(s![from..to]).fill(1.);
+            }
         }
 
         let ngrams = self.chars.len() - Self::WINDOW + 1;
@@ -433,8 +435,9 @@ mod tests {
     #[test]
     fn should_be_able_to_reconstruct_ground_truth_labels() {
         let example = PhonySample {
-            text: String::from("text"),
-            spans: vec![(0, 1), (2, 4)],
+            sample: String::from("text"),
+            label: Some(vec![(0, 1), (2, 4)]),
+            prediction: None,
         };
         let p = PhonyProblem::new(&example).unwrap();
 

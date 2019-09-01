@@ -78,7 +78,11 @@ pub fn augment<T: AsRef<str>>(
         text.push_str(span);
     }
 
-    Some(PhonySample { text, spans })
+    Some(PhonySample {
+        sample: text,
+        label: Some(spans),
+        prediction: None,
+    })
 }
 
 fn prepare_generator() -> PhoneGenerator {
@@ -498,12 +502,12 @@ mod tests {
     fn test_create_augmented_sample() {
         let text = "Первый: <PHONE>, второй: <PHONE>";
         let list = vec!["1", "2"];
-        let sample = augment(text, &mut list.iter()).unwrap();
+        let record = augment(text, &mut list.iter()).unwrap();
 
-        assert_eq!(sample.text, "Первый: 1, второй: 2");
-        assert_eq!(sample.spans, vec![(8, 9), (19, 20)]);
+        assert_eq!(record.sample, "Первый: 1, второй: 2");
+        assert_eq!(record.label, Some(vec![(8, 9), (19, 20)]));
 
-        let json = serde_json::to_string(&sample).unwrap();
+        let json = serde_json::to_string(&record).unwrap();
         let expected = r#"{"text":"Первый: 1, второй: 2","spans":[[8,9],[19,20]]}"#;
         assert_eq!(json, expected)
     }
