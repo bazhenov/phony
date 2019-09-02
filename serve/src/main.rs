@@ -143,7 +143,8 @@ fn inference(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         let problem = PhonyProblem::new(&record)?;
         let spans = runner.run_problem(&problem)?;
         for span in spans {
-            let phone = line
+            let phone = record
+                .sample
                 .chars()
                 .skip(span.0)
                 .take(span.1 - span.0)
