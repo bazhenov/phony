@@ -5,6 +5,7 @@ mount-private					= -v `pwd`/private:/wd -w /wd
 mount-sources					= -v `pwd`:/wd -w /wd
 
 epochs								= 10
+heldout_examples			= 50000
 
 # GPU_IDX is the number of active GPU in nvidia-smi (0 if single GPU is present in the system)
 ifdef GPU_IDX
@@ -27,9 +28,6 @@ learn: private/input.hdf5
 	$(docker-run) -t $(mount-private) $(gpu-flags) $(phony-container) /learn.py -f input.hdf5 -o ./model -e $(epochs) \
 		-v 0.05
 
-private/inference.ndjson: private/input.ndjson
-	serve inference-file -i private/input.ndjson -o $@ --model $(MODEL)
-
 # Builds a docker container with phony
 docker:
 	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1 learn
@@ -38,9 +36,23 @@ docker-gpu:
 	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1-gpu learn
 
 private/input.ndjson: private/sq.ndjson
-	cat private/sq.ndjson | jq -c '{sample: .text, label: (.spans | map([.start, .end]))}' > $@
+	cat private/sq.ndjson \
+	  | jq -c '{sample: .text, label: (.spans | map([.start, .end]))}' \
+		| phone-augment -j -p 0.1 > $@
 
-private/input.hdf5: private/input.ndjson
-	cat private/input.ndjson | head -100000 | serve export -o $@
+private/verify.ndjson: private/input.ndjson
+	head -$(heldout_examples) private/input.ndjson > $@
 
-.PHONY: build learn eval ipython
+private/learn.ndjson: private/input.ndjson
+	tail +$(heldout_examples) private/input.ndjson > $@
+
+private/input.hdf5: private/learn.ndjson
+	cat private/learn.ndjson | phony export -o $@
+
+private/eval.ndjson: private/verify.ndjson
+	phony inference-file --model=$(MODEL) -i private/verify.ndjson -o private/eval.ndjson
+
+eval: private/eval.ndjson
+	phony eval private/eval.ndjson
+
+.PHONY: build learn eval ipython eval

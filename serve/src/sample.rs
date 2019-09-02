@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// * prediction of the system of the same type `Y`.
 ///
 /// Label and prediction are both optional.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default, Debug)]
 pub struct Record<X, Y> {
     pub sample: X,
 
@@ -16,4 +16,22 @@ pub struct Record<X, Y> {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prediction: Option<Y>,
+}
+
+impl<X, Y> Record<X, Y> {
+    pub fn from_sample(sample: X) -> Self {
+        Record {
+            sample,
+            label: None,
+            prediction: None,
+        }
+    }
+
+    pub fn from_sample_and_label(sample: X, label: Y) -> Self {
+        Record {
+            sample,
+            label: Some(label),
+            prediction: None,
+        }
+    }
 }
