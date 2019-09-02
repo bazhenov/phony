@@ -3,14 +3,15 @@ extern crate clap;
 
 mod digits;
 mod numerate;
+mod phony;
 mod sample;
 
 use clap::App;
 use digits::Digits;
 use numerate::numerate;
+use phony::PhonySample;
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
-use sample::PhonySample;
 use std::collections::HashMap;
 use std::io::{stdin, stdout, BufRead};
 

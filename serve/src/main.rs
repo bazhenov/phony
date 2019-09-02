@@ -4,10 +4,11 @@ extern crate tensorflow;
 extern crate ndarray;
 
 pub mod phony;
+pub mod phony_tf;
 pub mod sample;
 pub mod tf_problem;
 
-use phony::{EvaluationMetric, MucMetric};
+use phony_tf::MucMetric;
 
 use clap::{App, ArgMatches, SubCommand};
 use std::env;
@@ -18,9 +19,9 @@ use std::fs::File;
 use std::io::{stdin, BufRead, BufReader, Write};
 use std::ops::Range;
 use std::process::exit;
-use tf_problem::{TensorflowProblem, TensorflowRunner};
+use tf_problem::{EvaluationMetric, TensorflowProblem, TensorflowRunner};
 
-use sample::{CharacterSpan, PhonySample};
+use phony::{CharacterSpan, PhonySample};
 
 use encoding::all::WINDOWS_1251;
 use encoding::{EncoderTrap, Encoding};
@@ -185,7 +186,7 @@ fn evaluate_results(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
         let record = serde_json::from_str::<PhonySample>(line.trim())?;
         if let Some(label) = record.label {
             if let Some(prediction) = record.prediction {
-                metric.feed(&label, &prediction);
+                metric.update(&label, &prediction);
             }
         }
     }
