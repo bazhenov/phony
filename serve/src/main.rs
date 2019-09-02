@@ -280,7 +280,7 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
     type Input = PhonySample;
     type Output = Vec<CharacterSpan>;
     const GRAPH_INPUT_NAME: &'static str = "input";
-    const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
+    const GRAPH_OUTPUT_NAME: &'static str = "flatten/Reshape";
 
     fn features(&self) -> Array2<Self::TensorInputType> {
         let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
