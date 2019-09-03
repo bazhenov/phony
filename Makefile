@@ -5,6 +5,7 @@ mount-private					= -v `pwd`/private:/wd -w /wd
 mount-sources					= -v `pwd`:/wd -w /wd
 
 epochs								= 10
+heldout_examples			= 50000
 
 # GPU_IDX is the number of active GPU in nvidia-smi (0 if single GPU is present in the system)
 ifdef GPU_IDX
@@ -40,10 +41,10 @@ private/input.ndjson: private/sq.ndjson
 		| augment -j -p 0.1 > $@
 
 private/verify.ndjson: private/input.ndjson
-	head -10000 private/input.ndjson > $@
+	head -$(heldout_examples) private/input.ndjson > $@
 
 private/learn.ndjson: private/input.ndjson
-	tail +10000 private/input.ndjson > $@
+	tail +$(heldout_examples) private/input.ndjson > $@
 
 private/input.hdf5: private/learn.ndjson
 	cat private/learn.ndjson | serve export -o $@
