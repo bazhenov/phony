@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// * prediction of the system of the same type `Y`.
 ///
 /// Label and prediction are both optional.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Record<X, Y> {
     pub sample: X,
 

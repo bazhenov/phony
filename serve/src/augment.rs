@@ -9,11 +9,13 @@ mod sample;
 use clap::App;
 use digits::Digits;
 use numerate::numerate;
-use phony::PhonySample;
+use phony::{mask, PhonySample};
 use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::io::{stdin, stdout, BufRead};
+
+const PHONE_MARKER: &str = "<PHONE>";
 
 fn main() {
     let app = App::new("phone-generate")
@@ -21,28 +23,56 @@ fn main() {
         .version("1.0.0")
         .about("CLI utility for synthetic augmentation of phone numbers")
         .arg_from_usage("[random] -r, --random 'Generate random phone numbers'")
-        .arg_from_usage("[stream] -s, --stream 'Generating numbers for a stream of input examples'")
-        .arg_from_usage("[count] -c, --count=[COUNT] 'Generate given number of examples'");
+        .arg_from_usage("[text] -t, --text 'Generating phone numbers for a input text'")
+        .arg_from_usage("[json] -j, --json 'Generating phone numbers for a input json records'")
+        .arg_from_usage("[count] -c, --count=[COUNT] 'Generate given number of examples'")
+        .arg_from_usage("[probability] -p, --probability=[PROBABILITY] 'Probability of augmentation (Default: 1)'");
 
     let matches = app.get_matches();
-    let stream_mode = matches.is_present("stream");
+    let text_mode = matches.is_present("text");
     let random_mode = matches.is_present("random");
+    let json_mode = matches.is_present("json");
+
+    let mut probability = value_t!(matches, "probability", f32).unwrap_or(1.);
+    if !(0.0..1.0).contains(&probability) {
+        probability = 1.;
+    }
 
     let count = value_t!(matches, "count", u32).unwrap_or(1);
 
     let mut generator = prepare_generator();
 
+    let mut rng = thread_rng();
+
     if random_mode {
         for _ in 0..count {
             println!("{}", generator.generate_random());
         }
-    } else if stream_mode {
+    } else if text_mode {
         for line in stdin().lock().lines() {
             let line = line.expect("Unable to read");
             for _ in 0..count {
                 let sample = augment(&line, &mut generator);
                 serde_json::to_writer(stdout(), &sample).expect("Unable to write json");
                 println!();
+            }
+        }
+    } else if json_mode {
+        for line in stdin().lock().lines() {
+            let line = line.expect("Unable to read");
+            for _ in 0..count {
+                let record =
+                    serde_json::from_str::<PhonySample>(line.trim()).expect("Unable to read json");
+
+                if record.label.is_some() && rng.gen_range(0.0, 1.0) < probability {
+                    let record = mask(&record, PHONE_MARKER);
+                    let record = augment(&record.sample, &mut generator);
+                    serde_json::to_writer(stdout(), &record).expect("Unable to write json");
+                    println!();
+                } else {
+                    serde_json::to_writer(stdout(), &record).expect("Unable to write json");
+                    println!();
+                }
             }
         }
     }
@@ -55,10 +85,9 @@ pub fn augment<T: AsRef<str>>(
     let mut text = String::with_capacity(message.len());
     let mut offset_chars = 0;
     let mut span = message;
-    let pattern = "<PHONE>";
     let mut spans = vec![];
 
-    while let Some(match_offset) = span.find(pattern) {
+    while let Some(match_offset) = span.find(PHONE_MARKER) {
         offset_chars += span[..match_offset].chars().count();
         text.push_str(&span[..match_offset]);
         if let Some(n) = values.next() {
@@ -72,7 +101,7 @@ pub fn augment<T: AsRef<str>>(
             return None;
         }
 
-        span = &span[match_offset + pattern.len()..];
+        span = &span[match_offset + PHONE_MARKER.len()..];
     }
 
     if !span.is_empty() {
@@ -82,7 +111,7 @@ pub fn augment<T: AsRef<str>>(
     Some(PhonySample {
         sample: text,
         label: Some(spans),
-        prediction: None,
+        ..Default::default()
     })
 }
 
