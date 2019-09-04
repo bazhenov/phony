@@ -1,6 +1,8 @@
-use crate::phony::CharacterSpan;
-use crate::tf_problem::EvaluationMetric;
+use crate::phony::{CharacterSpan, PhonyProblem, PhonySample};
+use crate::tf_problem::{EvaluationMetric, TensorflowProblem};
+use ndarray::Array2;
 use std::fmt;
+use std::ops::Range;
 
 /// Implements modified metric for evaluating NER systems proposed on Message Understanding Conference.
 ///
@@ -101,11 +103,177 @@ pub fn does_spans_intersects(a: CharacterSpan, b: CharacterSpan) -> bool {
     (b.0 >= a.0 && b.0 < a.1) || (a.0 >= b.0 && a.0 < b.1)
 }
 
+impl<'a> TensorflowProblem for PhonyProblem<'a> {
+    type TensorInputType = f32;
+    type TensorOutputType = f32;
+    type Input = PhonySample;
+    type Output = Vec<CharacterSpan>;
+    const GRAPH_INPUT_NAME: &'static str = "input";
+    const GRAPH_OUTPUT_NAME: &'static str = "flatten/Reshape";
+
+    fn features(&self) -> Array2<Self::TensorInputType> {
+        let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
+
+        let mut result = Array2::zeros((ngrams.len(), Self::WINDOW));
+
+        for (i, ngram) in ngrams.iter().enumerate() {
+            for (j, c) in ngram.iter().enumerate() {
+                result[[i, j]] = f32::from(*c);
+            }
+        }
+
+        result
+    }
+
+    fn output(&self, tensors: Array2<Self::TensorOutputType>) -> Self::Output {
+        let mut mask = vec![Accumulator(0, 0); self.chars.len()];
+        let character_length = self.chars.len() - self.left_padding - self.right_padding;
+
+        for i in 0..tensors.rows() {
+            for j in 0..tensors.cols() {
+                mask[i + j].register(tensors[[i, j]] > 0.5);
+            }
+        }
+        mask.iter()
+            .map(|a| a.ratio() > 0.5)
+            // отрезаем от маски "хвостики" порожденные padding'ом строки
+            .skip(self.left_padding)
+            .take(character_length)
+            .spans(|c| c)
+            .map(|r| (r.start, r.end))
+            .collect()
+    }
+}
+
+struct Spans<'a, I, F> {
+    iterator: &'a mut I,
+    position: usize,
+    predicate: F,
+}
+
+trait SpanExtension: Iterator + Sized {
+    fn spans<F>(&mut self, f: F) -> Spans<'_, Self, F>
+    where
+        F: Fn(Self::Item) -> bool,
+    {
+        Spans {
+            iterator: self,
+            position: 0,
+            predicate: f,
+        }
+    }
+}
+
+impl<T: Iterator> SpanExtension for T {}
+
+impl<I, F> Iterator for Spans<'_, I, F>
+where
+    I: Iterator,
+    F: Fn(I::Item) -> bool,
+{
+    type Item = Range<usize>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            self.position += 1;
+            match self.iterator.next().map(&self.predicate) {
+                Some(true) => break,
+                None => return None,
+                Some(false) => {}
+            }
+        }
+        let from = self.position - 1;
+        loop {
+            self.position += 1;
+            match self.iterator.next().map(&self.predicate) {
+                Some(false) => return Some(from..self.position - 1),
+                None => return Some(from..self.position - 1),
+                Some(true) => {}
+            }
+        }
+    }
+}
+
+/// Простой счетчик – регистририует количество ложных/положительных срабатываный. Метод [`register`](#method.register)
+#[derive(Copy, Clone)]
+struct Accumulator(u16, u16);
+
+impl Accumulator {
+    /// Регистрирует срабатывание: ложное или положительное в зависимости от значения аргумента `hit`.
+    fn register(&mut self, hit: bool) {
+        if hit {
+            self.0 += 1;
+        }
+        self.1 += 1;
+    }
+
+    /// доля положительных вызовов по отношению к общему количеству
+    fn ratio(self) -> f32 {
+        f32::from(self.0) / f32::from(self.1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
     use crate::phony::PhonySample;
+
+    #[test]
+    fn pad_string() {
+        assert_eq!(
+            PhonyProblem::pad_string("123", 5),
+            Some((1usize, String::from(" 123 "), 1usize))
+        );
+    }
+
+    #[test]
+    fn groups() {
+        let v = vec![0, 0, 1, 0, 0, 1, 1, 1, 0];
+
+        let spans = v.iter().spans(|i| *i > 0).collect::<Vec<_>>();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0], 2..3);
+        assert_eq!(spans[1], 5..8);
+
+        let spans = v.iter().spans(|i| *i == 0).collect::<Vec<_>>();
+        assert_eq!(spans.len(), 3);
+        assert_eq!(spans[0], 0..2);
+        assert_eq!(spans[1], 3..5);
+        assert_eq!(spans[2], 8..9);
+    }
+
+    #[test]
+    fn should_be_able_to_reconstruct_ground_truth_labels() {
+        let example = PhonySample {
+            sample: String::from("text"),
+            label: Some(vec![(0, 1), (2, 4)]),
+            prediction: None,
+        };
+        let p = PhonyProblem::new(&example).unwrap();
+
+        let truth = p.ground_truth();
+        assert_eq!(p.left_padding, 30);
+        assert_eq!(p.right_padding, 30);
+        // Индексы в маске смещены из за padding'а. Это необходимо учитывать при изменений ширины окна
+        let mut expected = Array2::zeros((1, 64));
+        expected[[0, p.left_padding]] = 1.;
+        expected[[0, p.left_padding + 2]] = 1.;
+        expected[[0, p.left_padding + 3]] = 1.;
+        assert_eq!(truth, expected);
+        //assert_eq!(p.output(truth), vec![(0, 1), (2, 4)]);
+    }
+
+    #[test]
+    fn shoud_be_able_to_stack() {
+        use ndarray::arr2;
+
+        let a = arr2(&[[1, 2], [3, 4]]);
+        let b = arr2(&[[5, 6], [7, 8]]);
+
+        let r = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]);
+        println!("{:?}", r);
+    }
 
     #[test]
     fn muc_strict_match() {

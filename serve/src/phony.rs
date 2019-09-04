@@ -1,7 +1,91 @@
+use std::error::Error;
+
 use crate::sample::Record;
+use encoding::all::WINDOWS_1251;
+use encoding::{EncoderTrap, Encoding};
+
+use ndarray::{s, Array1, Array2};
 
 pub type CharacterSpan = (usize, usize);
 pub type PhonySample = Record<String, Vec<CharacterSpan>>;
+
+pub struct PhonyProblem<'a> {
+    pub chars: Vec<u8>,
+    pub left_padding: usize,
+    pub right_padding: usize,
+    pub sample: &'a PhonySample,
+}
+
+impl<'a> PhonyProblem<'a> {
+    pub const WINDOW: usize = 64;
+
+    pub fn new(sample: &'a PhonySample) -> Result<Self, Box<dyn Error>> {
+        if let Some((left_padding, padded_string, right_padding)) =
+            Self::pad_string(&sample.sample, Self::WINDOW)
+        {
+            Ok(PhonyProblem {
+                chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
+                left_padding,
+                right_padding,
+                sample,
+            })
+        } else {
+            Ok(PhonyProblem {
+                chars: WINDOWS_1251.encode(&sample.sample, EncoderTrap::Strict)?,
+                left_padding: 0,
+                right_padding: 0,
+                sample,
+            })
+        }
+    }
+
+    pub fn ground_truth(&self) -> Array2<f32> {
+        let mut mask1d = Array1::<f32>::zeros(self.chars.len());
+
+        if let Some(spans) = &self.sample.label {
+            for span in spans {
+                let from = self.left_padding + span.0;
+                let to = self.left_padding + span.1;
+                mask1d.slice_mut(s![from..to]).fill(1.);
+            }
+        }
+
+        let ngrams = self.chars.len() - Self::WINDOW + 1;
+        let mut mask2d = Array2::<f32>::zeros((ngrams, Self::WINDOW));
+
+        for (i, mut row) in mask2d.genrows_mut().into_iter().enumerate() {
+            let from = i;
+            let to = i + Self::WINDOW;
+            row.assign(&mask1d.slice(s![from..to]));
+        }
+
+        mask2d
+    }
+
+    pub fn pad_string(string: &str, desired_length: usize) -> Option<(usize, String, usize)> {
+        let char_length = string.chars().count();
+        if char_length >= desired_length {
+            return None;
+        }
+
+        let bytes_length = string.len();
+        let left_padding = (desired_length - char_length) / 2;
+        let right_padding = desired_length - char_length - left_padding;
+        let mut padded_string = String::with_capacity(bytes_length + left_padding + right_padding);
+
+        for _ in 0..left_padding {
+            padded_string.push(' ');
+        }
+
+        padded_string.push_str(string);
+
+        for _ in 0..right_padding {
+            padded_string.push(' ');
+        }
+
+        Some((left_padding, padded_string, right_padding))
+    }
+}
 
 pub fn mask(record: &PhonySample, mask: &str) -> PhonySample {
     let mut result = String::new();
