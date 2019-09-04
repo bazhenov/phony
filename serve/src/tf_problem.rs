@@ -1,4 +1,4 @@
-use ndarray::{Array, Array2};
+use ndarray::{Array, Dim, Dimension};
 use std::convert::TryFrom;
 use std::error::Error;
 use std::path::Path;
@@ -16,18 +16,26 @@ use tf::{Graph, Operation, Session, SessionOptions, SessionRunArgs, Status, Tens
 /// Выход – это ответ системы, который содержит пометку класса или любую другую информацию, которая
 /// является целью вычислений. И вход и выход являются именами соответствующх placeholder'ов/слоев в tensorflow-модели.
 /// Поэтому, они должны быть определена в графе и в данной абстракции согласованным образом;
-/// * логика получения тензора из примера (`tensors_from_example`). Каждый входящий пример (тип `Input`)
+/// * логика получения тензора из примера (`features`). Каждый входящий пример (тип `Input`)
 /// должен быть преобразован в тензор, размерность которого согласуется с размерностью входного placeholder'а
 /// вычислительного графа tensorflow;
-/// * логика преобразования выходного тензора в результат вычислений (`output_from_tensors`). Этот код интерпретирует
+/// * логика преобразования выходного тензора в результат вычислений (`output`). Этот код интерпретирует
 /// результат вычислений tensorflow и формирует ответ (тип `Output` – класс, пометка, координаты найденой
 /// области и т.д.);
+/// * логика получения истинных пометок из примера (`ground_truth`), которая требуется на этапе обучения для
+/// предоставления системе верных ответов
 pub trait TensorflowProblem {
     /// Тип тензора-входа (`u32`/`f32` и т.д.)
     type TensorInputType: TensorType + Copy;
 
     /// Тип тензора-выхода (`u32`/`f32` и т.д.)
     type TensorOutputType: TensorType + Copy;
+
+    /// Форма входного тензора (например, `ndarray::Ix2`)
+    type InputDim: Dimension;
+
+    /// Форма выходного тензора (например, `ndarray::Ix2`)
+    type OutputDim: Dimension;
 
     /// Тип обрабатываемого примера. Например для задач классификации текстов: входной пример будет иметь тип `String`.
     type Input: ?Sized;
@@ -46,16 +54,16 @@ pub trait TensorflowProblem {
     ///
     /// Тензор возвращаемый из этого метода по своей форме должен быть совместим с placeholder'ом вычислительного
     /// графа указанным в константе `GRAPH_INPUT_NAME`.
-    fn features(&self) -> Array2<Self::TensorInputType>;
+    fn features(&self) -> Array<Self::TensorInputType, Self::InputDim>;
 
     /// Возвращает ожидаемый (корректный) ответ системы в виде тензора. Используется на этапе обучения.
-    fn ground_truth(&self) -> Array2<Self::TensorOutputType>;
+    fn ground_truth(&self) -> Array<Self::TensorOutputType, Self::OutputDim>;
 
     /// Формирует ответ системы на основании вычислений tensorflow.
     ///
     /// Принимает исходный пример, а также тензор из слоя указанного в `GRAPH_OUTPUT_NAME`. На основании этой
     /// информации формирует конечный ответ на задачу целиком.
-    fn output(&self, tensor: Array2<Self::TensorOutputType>) -> Self::Output;
+    fn output(&self, tensor: Array<Self::TensorOutputType, Self::OutputDim>) -> Self::Output;
 
     fn retrieve_input_output(&self, graph: &Graph) -> tf::Result<(Operation, Operation)> {
         let input = graph.operation_by_name_required(Self::GRAPH_INPUT_NAME)?;
@@ -80,11 +88,12 @@ pub trait TensorflowProblem {
     }
 }
 
-fn tensor_from_ndarray<T, S>(input: Array<T, S>) -> Tensor<T>
+fn tensor_from_ndarray<T, D>(input: Array<T, D>) -> Tensor<T>
 where
     T: TensorType,
-    S: ndarray::Dimension,
+    D: ndarray::Dimension,
 {
+    assert!(input.is_standard_layout(), "ndarray should be in standard (row-major) layout. Make sure you doesn't use ShapeBuilder::f() method when creating tensors");
     let shape = input
         .shape()
         .iter()
@@ -99,15 +108,29 @@ where
         .expect("Can't build tensor")
 }
 
-fn ndarray_from_tensor<T: TensorType + Copy>(input: Tensor<T>) -> Array2<T> {
-    let [rows, columns] = match *input.dims() {
-        [a, b] => [a, b],
-        _ => panic!("Should be 2-dimensional"),
-    };
-    let dims = [rows as usize, columns as usize];
+/// Creates ndarray from tensorflow Tensor.
+///
+/// dimension provided should only describe the number of dimensions, but not the shape. The shape is
+/// taken from tensorflow Tensor. So this is perfectly valid call:
+/// ```
+/// let array2d = ndarray_from_tensor(tensor, Dim([0, 0]));
+/// ```
+fn ndarray_from_tensor<T, D>(input: Tensor<T>, dimension: D) -> Array<T, D>
+where
+    T: TensorType + Copy,
+    D: ndarray::Dimension,
+{
+    if dimension.ndim() != input.dims().len() {
+        panic!("Shape mismatch: {:?}, {:?}", dimension, input.dims());
+    }
+    let mut dimension = dimension.clone();
+    for i in 0..dimension.ndim() {
+        dimension[i] = input.dims()[i] as usize;
+    }
+
     Array::from_iter(input.iter().cloned())
-        .into_shape(dims)
-        .expect("Unable to reshape")
+        .into_shape(dimension)
+        .unwrap()
 }
 
 pub struct TensorflowRunner {
@@ -131,12 +154,14 @@ impl TensorflowRunner {
         let (input_op, output_op) = problem.retrieve_input_output(&self.graph)?;
 
         let inputs = problem.features();
-        assert!(inputs.is_standard_layout(), "ndarray should be in standard (row-major) layout. Make sure you doesn't use ShapeBuilder::f() method when creating tensors");
+
+        // Создаем массив нулей рамера эквивалентного размеру выходного тензора
+        let dims = <P as TensorflowProblem>::OutputDim::default();
 
         let tensor = tensor_from_ndarray(inputs);
         let output = problem
             .feed(&self.session, &input_op, &output_op, &tensor)
-            .map(ndarray_from_tensor)
+            .map(|i| ndarray_from_tensor(i, Dim(dims)))
             .map(|tensor| problem.output(tensor))?;
 
         Ok(output)
@@ -159,19 +184,36 @@ pub trait EvaluationMetric<T: ?Sized> {
 mod tests {
 
     use super::*;
-    use ndarray::arr2;
+    use ndarray::{arr1, arr2, arr3};
 
     #[test]
-    fn create_ndarray_from_tensor() {
+    fn tensor_conversion() {
+        test_conversion(arr1(&[1, 2, 3, 4, 5]));
+        test_conversion(arr2(&[[1, 2], [3, 4]]));
+        test_conversion(arr3(&[[[1], [2]], [[3], [4]]]));
+    }
+
+    fn test_conversion<T, D>(ndarray: Array<T, D>)
+    where
+        T: Copy + TensorType + PartialEq,
+        D: ndarray::Dimension,
+    {
+        let tensor = tensor_from_ndarray(ndarray.clone());
+        let ndarray_copy = ndarray_from_tensor(tensor, ndarray.raw_dim());
+        assert_eq!(ndarray, ndarray_copy);
+    }
+
+    #[test]
+    fn create_2d_ndarray_from_tensor() {
         let tensor = Tensor::new(&[2, 2]).with_values(&[1, 2, 3, 4]);
-        let ndarray = tensor.map(ndarray_from_tensor).unwrap();
+        let ndarray = tensor.map(|i| ndarray_from_tensor(i, Dim([0, 0]))).unwrap();
         assert_eq!(ndarray.dim(), (2usize, 2usize));
         // Array values are expected in row-major format
         assert_eq!(ndarray.as_slice(), Some(&[1, 2, 3, 4][..]));
     }
 
     #[test]
-    fn create_tensor_from_ndarray() {
+    fn create_2d_tensor_from_ndarray() {
         let tensor = tensor_from_ndarray(arr2(&[[1, 2], [3, 4]]));
         assert_eq!(tensor.dims(), &[2, 2]);
         let content = tensor.iter().cloned().collect::<Vec<_>>();

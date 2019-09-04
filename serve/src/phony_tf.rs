@@ -158,6 +158,8 @@ impl<'a> PhonyProblem<'a> {
 impl<'a> TensorflowProblem for PhonyProblem<'a> {
     type TensorInputType = f32;
     type TensorOutputType = f32;
+    type InputDim = ndarray::Ix2;
+    type OutputDim = ndarray::Ix2;
     type Input = PhonySample;
     type Output = Vec<CharacterSpan>;
     const GRAPH_INPUT_NAME: &'static str = "input";
