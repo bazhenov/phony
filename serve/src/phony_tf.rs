@@ -119,7 +119,7 @@ impl<'a> PhonyProblem<'a> {
 
     pub fn new(sample: &'a PhonySample) -> Result<Self, Box<dyn Error>> {
         if let Some((left_padding, padded_string, right_padding)) =
-            Self::pad_string(&sample.sample, Self::WINDOW)
+            pad_string(&sample.sample, Self::WINDOW)
         {
             Ok(PhonyProblem {
                 chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
@@ -135,30 +135,6 @@ impl<'a> PhonyProblem<'a> {
                 sample,
             })
         }
-    }
-
-    pub fn pad_string(string: &str, desired_length: usize) -> Option<(usize, String, usize)> {
-        let char_length = string.chars().count();
-        if char_length >= desired_length {
-            return None;
-        }
-
-        let bytes_length = string.len();
-        let left_padding = (desired_length - char_length) / 2;
-        let right_padding = desired_length - char_length - left_padding;
-        let mut padded_string = String::with_capacity(bytes_length + left_padding + right_padding);
-
-        for _ in 0..left_padding {
-            padded_string.push(' ');
-        }
-
-        padded_string.push_str(string);
-
-        for _ in 0..right_padding {
-            padded_string.push(' ');
-        }
-
-        Some((left_padding, padded_string, right_padding))
     }
 }
 
@@ -246,6 +222,30 @@ trait SpanExtension: Iterator + Sized {
     }
 }
 
+fn pad_string(string: &str, desired_length: usize) -> Option<(usize, String, usize)> {
+    let char_length = string.chars().count();
+    if char_length >= desired_length {
+        return None;
+    }
+
+    let bytes_length = string.len();
+    let left_padding = (desired_length - char_length) / 2;
+    let right_padding = desired_length - char_length - left_padding;
+    let mut padded_string = String::with_capacity(bytes_length + left_padding + right_padding);
+
+    for _ in 0..left_padding {
+        padded_string.push(' ');
+    }
+
+    padded_string.push_str(string);
+
+    for _ in 0..right_padding {
+        padded_string.push(' ');
+    }
+
+    Some((left_padding, padded_string, right_padding))
+}
+
 impl<T: Iterator> SpanExtension for T {}
 
 impl<I, F> Iterator for Spans<'_, I, F>
@@ -302,9 +302,9 @@ mod tests {
     use crate::phony::PhonySample;
 
     #[test]
-    fn pad_string() {
+    fn check_pad_string() {
         assert_eq!(
-            PhonyProblem::pad_string("123", 5),
+            pad_string("123", 5),
             Some((1usize, String::from(" 123 "), 1usize))
         );
     }
@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn should_be_able_to_read_sample_only() {
+    fn should_be_able_to_read_sample_without_lables_and_prediction() {
         let json = r#"{"sample":"Текст"}"#;
         let record = serde_json::from_str::<PhonySample>(json).expect("Unable to read sample");
 
