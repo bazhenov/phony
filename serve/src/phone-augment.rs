@@ -20,7 +20,7 @@ const PHONE_MARKER: &str = "<PHONE>";
 fn main() {
     let app = App::new("phone-augment")
         .author("Denis Bazhenov <dotsid@gmail.com>")
-        .version("1.0.0")
+        .version("0.1.0")
         .about("CLI utility for synthetic augmentation of phone numbers")
         .arg_from_usage("[random] -r, --random 'Generate random phone numbers'")
         .arg_from_usage("[text] -t, --text 'Generating phone numbers for a input text'")
