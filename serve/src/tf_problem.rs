@@ -1,4 +1,4 @@
-use ndarray::{Array, Array2};
+use ndarray::{Array, Array2, Dimension};
 use std::convert::TryFrom;
 use std::error::Error;
 use std::path::Path;
@@ -29,6 +29,9 @@ pub trait TensorflowProblem {
     /// Тип тензора-выхода (`u32`/`f32` и т.д.)
     type TensorOutputType: TensorType + Copy;
 
+    type TensorInputShape: Dimension;
+    type TensorOutputShape: Dimension;
+
     /// Тип обрабатываемого примера. Например для задач классификации текстов: входной пример будет иметь тип `String`.
     type Input: ?Sized;
 
@@ -46,10 +49,10 @@ pub trait TensorflowProblem {
     ///
     /// Тензор возвращаемый из этого метода по своей форме должен быть совместим с placeholder'ом вычислительного
     /// графа указанным в константе `GRAPH_INPUT_NAME`.
-    fn features(&self) -> Array2<Self::TensorInputType>;
+    fn features(&self) -> Array<Self::TensorInputType, Self::TensorInputShape>;
 
     /// Возвращает ожидаемый (корректный) ответ системы в виде тензора. Используется на этапе обучения.
-    fn ground_truth(&self) -> Array2<Self::TensorOutputType>;
+    fn ground_truth(&self) -> Array<Self::TensorOutputType, Self::TensorOutputShape>;
 
     /// Формирует ответ системы на основании вычислений tensorflow.
     ///
