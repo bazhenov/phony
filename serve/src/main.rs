@@ -23,7 +23,7 @@ use phony::PhonySample;
 use phony_tf::PhonyProblem;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let matches = App::new("phony-serve")
+    let matches = App::new("phony")
         .author("Denis Bazhenov <dotsid@gmail.com>")
         .version("1.0.0")
         .about("CLI utility for phony classification problem")

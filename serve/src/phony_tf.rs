@@ -331,11 +331,8 @@ mod tests {
 
     #[test]
     fn should_be_able_to_reconstruct_ground_truth_labels() {
-        let example = PhonySample {
-            sample: String::from("text"),
-            label: Some(vec![(0, 1), (2, 4)]),
-            prediction: None,
-        };
+        let example =
+            PhonySample::from_sample_and_label(String::from("text"), vec![(0, 1), (2, 4)]);
         let p = PhonyProblem::new(&example).unwrap();
 
         let truth = p.ground_truth();

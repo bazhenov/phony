@@ -18,7 +18,7 @@ use std::io::{stdin, stdout, BufRead};
 const PHONE_MARKER: &str = "<PHONE>";
 
 fn main() {
-    let app = App::new("phone-generate")
+    let app = App::new("phone-augment")
         .author("Denis Bazhenov <dotsid@gmail.com>")
         .version("1.0.0")
         .about("CLI utility for synthetic augmentation of phone numbers")
@@ -39,9 +39,7 @@ fn main() {
     }
 
     let count = value_t!(matches, "count", u32).unwrap_or(1);
-
     let mut generator = prepare_generator();
-
     let mut rng = thread_rng();
 
     if random_mode {
@@ -75,6 +73,9 @@ fn main() {
                 }
             }
         }
+    } else {
+        // Default mode is just generating one phone and print it
+        println!("{}", generator.generate_random());
     }
 }
 

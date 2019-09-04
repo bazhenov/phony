@@ -5,12 +5,12 @@ authors = ["Denis Bazhenov <dotsid@gmail.com>"]
 edition = "2018"
 
 [[bin]]
-name = "serve"
+name = "phony"
 path = "src/main.rs"
 
 [[bin]]
-name = "augment"
-path = "src/augment.rs"
+name = "phone-augment"
+path = "src/phone-augment.rs"
 
 [dependencies]
 tensorflow = "~0.13"

@@ -38,7 +38,7 @@ docker-gpu:
 private/input.ndjson: private/sq.ndjson
 	cat private/sq.ndjson \
 	  | jq -c '{sample: .text, label: (.spans | map([.start, .end]))}' \
-		| augment -j -p 0.1 > $@
+		| phone-augment -j -p 0.1 > $@
 
 private/verify.ndjson: private/input.ndjson
 	head -$(heldout_examples) private/input.ndjson > $@
@@ -47,12 +47,12 @@ private/learn.ndjson: private/input.ndjson
 	tail +$(heldout_examples) private/input.ndjson > $@
 
 private/input.hdf5: private/learn.ndjson
-	cat private/learn.ndjson | serve export -o $@
+	cat private/learn.ndjson | phony export -o $@
 
 private/eval.ndjson: private/verify.ndjson
-	serve inference-file --model=$(MODEL) -i private/verify.ndjson -o private/eval.ndjson
+	phony inference-file --model=$(MODEL) -i private/verify.ndjson -o private/eval.ndjson
 
 eval: private/eval.ndjson
-	serve eval private/eval.ndjson
+	phony eval private/eval.ndjson
 
 .PHONY: build learn eval ipython eval
