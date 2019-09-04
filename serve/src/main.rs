@@ -19,7 +19,8 @@ use std::io::{stdin, BufRead, BufReader, Write};
 use std::process::exit;
 use tf_problem::{EvaluationMetric, TensorflowProblem, TensorflowRunner};
 
-use phony::{PhonyProblem, PhonySample};
+use phony::PhonySample;
+use phony_tf::PhonyProblem;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let matches = App::new("phony-serve")

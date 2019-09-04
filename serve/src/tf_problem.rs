@@ -48,6 +48,9 @@ pub trait TensorflowProblem {
     /// графа указанным в константе `GRAPH_INPUT_NAME`.
     fn features(&self) -> Array2<Self::TensorInputType>;
 
+    /// Возвращает ожидаемый (корректный) ответ системы в виде тензора. Используется на этапе обучения.
+    fn ground_truth(&self) -> Array2<Self::TensorOutputType>;
+
     /// Формирует ответ системы на основании вычислений tensorflow.
     ///
     /// Принимает исходный пример, а также тензор из слоя указанного в `GRAPH_OUTPUT_NAME`. На основании этой
