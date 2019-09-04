@@ -107,25 +107,41 @@ pub fn does_spans_intersects(a: CharacterSpan, b: CharacterSpan) -> bool {
     (b.0 >= a.0 && b.0 < a.1) || (a.0 >= b.0 && a.0 < b.1)
 }
 
+#[derive(Debug)]
 pub struct PhonyProblem<'a> {
-    pub chars: Vec<u8>,
-    pub left_padding: usize,
-    pub right_padding: usize,
-    pub sample: &'a PhonySample,
+    chars: Vec<u8>,
+    left_padding: usize,
+    right_padding: usize,
+    sample: &'a PhonySample,
+    window: usize,
 }
 
 impl<'a> PhonyProblem<'a> {
-    pub const WINDOW: usize = 64;
+    const WINDOW: usize = 64;
 
     pub fn new(sample: &'a PhonySample) -> Result<Self, Box<dyn Error>> {
+        Self::new_with_window(sample, Self::WINDOW)
+    }
+
+    fn new_with_window(sample: &'a PhonySample, window: usize) -> Result<Self, Box<dyn Error>> {
+        assert!(window > 0, "window should be positive");
+
+        let length = sample.sample.chars().count();
+        let padding = (window - (length % window)) % window;
+        let desired_length = length + padding;
+
+        // At this point string desired length should be multiple of window size
+        assert!(desired_length % window == 0, "padding algorithm failed");
+
         if let Some((left_padding, padded_string, right_padding)) =
-            pad_string(&sample.sample, Self::WINDOW)
+            pad_string(&sample.sample, desired_length)
         {
             Ok(PhonyProblem {
                 chars: WINDOWS_1251.encode(&padded_string, EncoderTrap::Strict)?,
                 left_padding,
                 right_padding,
                 sample,
+                window,
             })
         } else {
             Ok(PhonyProblem {
@@ -133,6 +149,7 @@ impl<'a> PhonyProblem<'a> {
                 left_padding: 0,
                 right_padding: 0,
                 sample,
+                window,
             })
         }
     }
@@ -147,12 +164,12 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
     const GRAPH_OUTPUT_NAME: &'static str = "flatten/Reshape";
 
     fn features(&self) -> Array2<Self::TensorInputType> {
-        let ngrams = self.chars.windows(Self::WINDOW).collect::<Vec<_>>();
+        let partitions = self.chars.chunks_exact(self.window).collect::<Vec<_>>();
 
-        let mut result = Array2::zeros((ngrams.len(), Self::WINDOW));
+        let mut result = Array2::zeros((partitions.len(), self.window));
 
-        for (i, ngram) in ngrams.iter().enumerate() {
-            for (j, c) in ngram.iter().enumerate() {
+        for (i, part) in partitions.iter().enumerate() {
+            for (j, c) in part.iter().enumerate() {
                 result[[i, j]] = f32::from(*c);
             }
         }
@@ -161,26 +178,31 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
     }
 
     fn output(&self, tensors: Array2<Self::TensorOutputType>) -> Self::Output {
-        let mut mask = vec![Accumulator(0, 0); self.chars.len()];
+        let mut mask = vec![0.; self.chars.len()];
         let character_length = self.chars.len() - self.left_padding - self.right_padding;
 
         for i in 0..tensors.rows() {
             for j in 0..tensors.cols() {
-                mask[i + j].register(tensors[[i, j]] > 0.5);
+                mask[(i * self.window) + j] = tensors[[i, j]];
             }
         }
         mask.iter()
-            .map(|a| a.ratio() > 0.5)
             // отрезаем от маски "хвостики" порожденные padding'ом строки
             .skip(self.left_padding)
             .take(character_length)
-            .spans(|c| c)
+            // получаем непрерывные span'ы с высоким значением вероятности
+            .spans(|a| *a > 0.5)
             .map(|r| (r.start, r.end))
             .collect()
     }
 
     fn ground_truth(&self) -> Array2<f32> {
-        let mut mask1d = Array1::<f32>::zeros(self.chars.len());
+        let length = self.chars.len();
+        assert!(
+            length % self.window == 0,
+            "String length should be miltiple of window"
+        );
+        let mut mask1d = Array1::<f32>::zeros(length);
 
         if let Some(spans) = &self.sample.label {
             for span in spans {
@@ -190,12 +212,12 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
             }
         }
 
-        let ngrams = self.chars.len() - Self::WINDOW + 1;
-        let mut mask2d = Array2::<f32>::zeros((ngrams, Self::WINDOW));
+        let partitions = length / self.window;
+        let mut mask2d = Array2::<f32>::zeros((partitions, self.window));
 
         for (i, mut row) in mask2d.genrows_mut().into_iter().enumerate() {
-            let from = i;
-            let to = i + Self::WINDOW;
+            let from = i * self.window;
+            let to = from + self.window;
             row.assign(&mask1d.slice(s![from..to]));
         }
 
@@ -276,30 +298,12 @@ where
     }
 }
 
-/// Простой счетчик – регистририует количество ложных/положительных срабатываный. Метод [`register`](#method.register)
-#[derive(Copy, Clone)]
-struct Accumulator(u16, u16);
-
-impl Accumulator {
-    /// Регистрирует срабатывание: ложное или положительное в зависимости от значения аргумента `hit`.
-    fn register(&mut self, hit: bool) {
-        if hit {
-            self.0 += 1;
-        }
-        self.1 += 1;
-    }
-
-    /// доля положительных вызовов по отношению к общему количеству
-    fn ratio(self) -> f32 {
-        f32::from(self.0) / f32::from(self.1)
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
     use crate::phony::PhonySample;
+    use ndarray::arr2;
 
     #[test]
     fn check_pad_string() {
@@ -344,17 +348,6 @@ mod tests {
         expected[[0, p.left_padding + 3]] = 1.;
         assert_eq!(truth, expected);
         //assert_eq!(p.output(truth), vec![(0, 1), (2, 4)]);
-    }
-
-    #[test]
-    fn shoud_be_able_to_stack() {
-        use ndarray::arr2;
-
-        let a = arr2(&[[1, 2], [3, 4]]);
-        let b = arr2(&[[5, 6], [7, 8]]);
-
-        let r = ndarray::stack(ndarray::Axis(0), &[a.view(), b.view()]);
-        println!("{:?}", r);
     }
 
     #[test]
@@ -457,5 +450,53 @@ mod tests {
         assert_eq!(record.sample, "Первый: 1, второй: 2");
         assert_eq!(record.label, Some(vec![(8, 9), (19, 20)]));
         assert_eq!(record.prediction, Some(vec![(1, 2), (3, 5)]));
+    }
+
+    #[test]
+    fn check_small_string_are_padded_correctly() {
+        // Check paddings with smaller values to make test easier
+        let sample = PhonySample::from_sample("foo".to_owned());
+        let problem = PhonyProblem::new_with_window(&sample, 4).unwrap();
+
+        // All paddings (left and right) should be 1 = 4 (window) - 3 (string length)
+        let all_paddings = problem.right_padding + problem.left_padding;
+        assert_eq!(all_paddings, 1);
+    }
+
+    #[test]
+    fn check_long_string_are_padded_correctly() {
+        // Check paddings with smaller values to make test easier
+        let sample = PhonySample::from_sample("some long string".to_owned());
+        let problem = PhonyProblem::new_with_window(&sample, 5).unwrap();
+
+        // All paddings (left and right) should be 4 = window - (string length % window)
+        // 4 = 5 - (16 % 5)
+        let all_paddings = problem.right_padding + problem.left_padding;
+        assert_eq!(all_paddings, 4);
+
+        let features = problem.features();
+        // 4 parts 5 characters each
+        assert_eq!(features.dim(), (4, 5));
+    }
+
+    #[test]
+    fn check_features_and_ground_labels_are_the_same_in_size() {
+        let sample =
+            PhonySample::from_sample_and_label("some long string".to_owned(), vec![(0, 4)]);
+        let problem = PhonyProblem::new_with_window(&sample, 5).unwrap();
+
+        let features = problem.features();
+        let ground_truth = problem.ground_truth();
+        assert_eq!(features.dim().0, ground_truth.dim().0);
+    }
+
+    #[test]
+    fn output_should_return_correctly_aligned_labels() {
+        // special string to ensure zero padding
+        let sample = PhonySample::from_sample("1234567890".to_owned());
+        let problem = PhonyProblem::new_with_window(&sample, 5).unwrap();
+
+        let out = problem.output(arr2(&[[0., 1., 1., 0., 1.], [1., 1., 0., 0., 0.]]));
+        assert_eq!(out, vec![(1, 3), (4, 7)]);
     }
 }
