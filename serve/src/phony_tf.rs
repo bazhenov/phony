@@ -163,7 +163,7 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
     type Input = PhonySample;
     type Output = Vec<CharacterSpan>;
     const GRAPH_INPUT_NAME: &'static str = "input";
-    const GRAPH_OUTPUT_NAME: &'static str = "flatten/Reshape";
+    const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
 
     fn features(&self) -> Array2<Self::TensorInputType> {
         let partitions = self.chars.chunks_exact(self.window).collect::<Vec<_>>();

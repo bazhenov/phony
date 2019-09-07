@@ -60,18 +60,13 @@ def json2vec(sample, l=64, start=None):
   return (x, y)
 
 def build_model():
-
   inputs = Input(shape=(64,), name="input")
 
   emb = x = Embedding(256, 4, input_length=64, name="embedding")(inputs)
 
-  x = Conv1D(32, 13, padding='same', activation='relu', name="conv1d-1")(x)
-  x = Dropout(0.1, name="dropout-1")(x)
-  x = Conv1D(64, 13, padding='same', activation='relu', name="conv1d-2")(x)
-  x = Dropout(0.1, name="dropout-2")(x)
-
+  x = Bidirectional(LSTM(10, return_sequences=True))(x)
   x = Dense(1, activation='sigmoid', name="final-dense")(x)
-  predictions = Flatten()(x)
+  predictions = Flatten(name = 'output')(x)
 
   model = Model(inputs = inputs, outputs=predictions)
   model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['binary_accuracy'])
