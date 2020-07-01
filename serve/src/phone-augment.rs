@@ -483,10 +483,7 @@ mod tests {
     fn test_as_text_phone_format() {
         let rule = AsTextPhoneFormat;
 
-        assert_eq!(
-            rule.format_phone(91),
-            Some("девяносто один".to_string())
-        );
+        assert_eq!(rule.format_phone(91), Some("девяносто один".to_string()));
         assert_eq!(rule.format_phone(6), Some("шесть".to_string()));
         assert_eq!(rule.format_phone(1345), None);
     }

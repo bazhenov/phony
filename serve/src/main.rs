@@ -71,10 +71,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 // см. https://rust-lang.github.io/rust-clippy/master/index.html#deref_addrof
 #[allow(clippy::deref_addrof)]
 fn export_features(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
-    use hdf5::File;
+    use hdf5;
 
     let file = matches.value_of("file").unwrap();
-    let file = File::open(file, "w")?;
+    let file = hdf5::File::create(file)?;
     let input_group = file.create_group("input")?;
     let output_group = file.create_group("output")?;
     let mut segment_index = 0usize..;
@@ -178,12 +178,17 @@ fn evaluate_results(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     let input = BufReader::new(File::open(input_file)?);
 
     let mut metric = MucMetric::new();
+    let mut sp = 0;
     for line in input.lines() {
         let line = line?;
         let record = serde_json::from_str::<PhonySample>(line.trim())?;
         if let Some(label) = record.label {
             if let Some(prediction) = record.prediction {
                 metric.update(&label, &prediction);
+                if sp != metric.spurious {
+                    println!("{}", line);
+                    sp = metric.spurious;
+                }
             }
         }
     }

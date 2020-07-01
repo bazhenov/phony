@@ -1,6 +1,7 @@
 use ndarray::{Array, Dim, Dimension};
 use std::convert::TryFrom;
 use std::error::Error;
+use std::iter::FromIterator;
 use std::path::Path;
 use tensorflow as tf;
 use tf::{Graph, Operation, Session, SessionOptions, SessionRunArgs, Status, Tensor, TensorType};

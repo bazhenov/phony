@@ -34,7 +34,7 @@ pub struct MucMetric {
     strict: usize,
     partial: usize,
     missing: usize,
-    spurious: usize,
+    pub spurious: usize,
 }
 
 impl MucMetric {

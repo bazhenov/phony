@@ -16,6 +16,14 @@ ifdef EPOCHS
 	epochs = $(EPOCHS)
 endif
 
+define jq_eval_proc
+	.sample as $$text | { \
+		text: $$text, \
+		label: .label | map($$text[.[0]:.[1]]) | select(. | length > 0), \
+		prediction: .prediction | map($$text[.[0]:.[1]]) | select(. | length > 0) \
+	} | select(.label != .prediction)
+endef
+
 clean:
 	rm -f private/input.ndjson private/sample.txt
 
@@ -54,5 +62,8 @@ private/eval.ndjson: private/verify.ndjson
 
 eval: private/eval.ndjson
 	phony eval private/eval.ndjson
+
+eval-check: private/eval.ndjson
+	cat private/eval.ndjson | jq '$(jq_eval_proc)' | less
 
 .PHONY: build learn eval ipython eval
