@@ -69,7 +69,8 @@ def build_model():
   predictions = Flatten(name = 'output')(x)
 
   model = Model(inputs = inputs, outputs=predictions)
-  model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['binary_accuracy'])
+  metrics = [tf.keras.metrics.Recall(), tf.keras.metrics.Precision()]
+  model.compile(loss='binary_crossentropy', optimizer='adam', metrics=metrics)
   return model
 
 if __name__ == "__main__":

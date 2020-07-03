@@ -46,7 +46,7 @@ docker-gpu:
 private/input.ndjson: private/sq.ndjson
 	cat private/sq.ndjson \
 	  | jq -c '{sample: .text, label: (.spans | map([.start, .end]))}' \
-		| phone-augment -j -p 0.1 > $@
+		| phone-augment -j -p 0.1 | grep -v '""' > $@
 
 private/verify.ndjson: private/input.ndjson
 	head -$(heldout_examples) private/input.ndjson > $@

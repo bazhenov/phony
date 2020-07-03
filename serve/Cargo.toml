@@ -13,7 +13,7 @@ name = "phone-augment"
 path = "src/phone-augment.rs"
 
 [dependencies]
-tensorflow = "~0.13"
+tensorflow = "~0.15"
 encoding = "~0.2"
 clap = "~2.33"
 rand = "~0.7"
