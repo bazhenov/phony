@@ -1,5 +1,5 @@
 ARG TF_VERSION
-FROM tensorflow/tensorflow:$TF_VERSION-py3
+FROM tensorflow/tensorflow:$TF_VERSION
 
 COPY learn.py /
 WORKDIR /

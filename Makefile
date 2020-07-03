@@ -38,10 +38,10 @@ learn: private/input.hdf5
 
 # Builds a docker container with phony
 docker:
-	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1 learn
+	docker build -t $(phony-container) --build-arg TF_VERSION=2.2.0 learn
 
 docker-gpu:
-	docker build -t $(phony-container) --build-arg TF_VERSION=1.13.1-gpu learn
+	docker build -t $(phony-container) --build-arg TF_VERSION=2.2.0-gpu learn
 
 private/input.ndjson: private/sq.ndjson
 	cat private/sq.ndjson \

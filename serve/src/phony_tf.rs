@@ -162,8 +162,8 @@ impl<'a> TensorflowProblem for PhonyProblem<'a> {
     type OutputDim = ndarray::Ix2;
     type Input = PhonySample;
     type Output = Vec<CharacterSpan>;
-    const GRAPH_INPUT_NAME: &'static str = "input";
-    const GRAPH_OUTPUT_NAME: &'static str = "output/Reshape";
+    const GRAPH_INPUT_NAME: &'static str = "serving_default_input";
+    const GRAPH_OUTPUT_NAME: &'static str = "StatefulPartitionedCall";
 
     fn features(&self) -> Array2<Self::TensorInputType> {
         let partitions = self.chars.chunks_exact(self.window).collect::<Vec<_>>();

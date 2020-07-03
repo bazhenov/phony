@@ -75,7 +75,7 @@ fn export_features(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
 
     let file = matches.value_of("file").unwrap();
     let file = hdf5::File::create(file)?;
-    let input_group = file.create_group("input")?;
+    let input_group = file.create_group("serving_default_input")?;
     let output_group = file.create_group("output")?;
     let mut segment_index = 0usize..;
     let mut segment_input = vec![];

@@ -1,7 +1,8 @@
 import tensorflow as tf
-from tensorflow.python.keras.models import Model
-from tensorflow.python.keras.layers import Dense, Embedding, Conv1D, Flatten, Dropout, Input,\
-        LSTM, Bidirectional
+from tensorflow import keras
+from tensorflow.keras import layers
+from tensorflow.keras import metrics
+
 from tensorflow.keras import backend as K
 from tensorflow.keras import callbacks
 import numpy as np
@@ -60,17 +61,17 @@ def json2vec(sample, l=64, start=None):
   return (x, y)
 
 def build_model():
-  inputs = Input(shape=(64,), name="input")
+  inputs = layers.Input(shape=(64,), name="input")
 
-  emb = x = Embedding(256, 4, input_length=64, name="embedding")(inputs)
+  emb = x = layers.Embedding(256, 4, input_length=64, name="embedding")(inputs)
 
-  x = Bidirectional(LSTM(10, return_sequences=True))(x)
-  x = Dense(1, activation='sigmoid', name="final-dense")(x)
-  predictions = Flatten(name = 'output')(x)
+  x = layers.Bidirectional(layers.LSTM(10, return_sequences=True))(x)
+  x = layers.Dense(1, activation='sigmoid', name="final-dense")(x)
+  predictions = layers.Flatten(name = 'output')(x)
 
-  model = Model(inputs = inputs, outputs=predictions)
-  metrics = [tf.keras.metrics.Recall(), tf.keras.metrics.Precision()]
-  model.compile(loss='binary_crossentropy', optimizer='adam', metrics=metrics)
+  model = keras.Model(inputs=inputs, outputs=predictions)
+  choosen_metrics = [metrics.Recall(), metrics.Precision()]
+  model.compile(loss='binary_crossentropy', optimizer='adam', metrics=choosen_metrics)
   return model
 
 if __name__ == "__main__":
@@ -87,7 +88,7 @@ if __name__ == "__main__":
   model.summary()
 
   print("Reading samples...")
-  h5 = h5py.File(options.filename)
+  h5 = h5py.File(options.filename, "r")
   X = []
   Y = []
   i = 0
@@ -108,7 +109,7 @@ if __name__ == "__main__":
   Y = np.vstack(Y)
   print("X shape = %s, Y shape = %s" % (str(X.shape), str(Y.shape)))
 
-  tensorboard_callback = callbacks.TensorBoard(log_dir='./tensorboard', histogram_freq=0, batch_size=32,
+  tensorboard_callback = callbacks.TensorBoard(log_dir='./tensorboard', histogram_freq=0,
           write_graph=True, write_grads=False, write_images=False, embeddings_freq=0,
           embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None, update_freq='epoch')
 
@@ -116,4 +117,5 @@ if __name__ == "__main__":
           shuffle=True, callbacks=[tensorboard_callback])
 
   print("Saving mode to: " + options.model)
-  tf.contrib.saved_model.save_keras_model(model, options.model)
+  model.save(options.model, include_optimizer=False)
+
