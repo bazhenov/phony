@@ -11,26 +11,25 @@ import fileinput
 import h5py
 
 def build_model():
-  inputs = layers.Input(shape=(31,), name="input", dtype=tf.uint32)
+  inputs = layers.Input(shape=(31,), name="input")
 
-  query_embedding = layers.Embedding(256, 4, input_length=31, name="query_embedding")(inputs)
+  emb = x = layers.Embedding(256, 2, input_length=31, name="embedding")(inputs)
 
-  cnn = layers.Conv1D(
-    filters=20,
-    kernel_size=11,
-    padding='same', activation="relu")
-
-  x = cnn(query_embedding)
+  x = layers.Bidirectional(layers.LSTM(5, return_sequences=True))(x)
+  x = layers.Dropout(0.1)(x)
+  x = layers.Conv1D(5, 3, activation='elu')(x)
+  x = layers.Conv1D(7, 5, activation='elu')(x)
+  x = layers.Conv1D(9, 9, activation='elu')(x)
+  x = layers.Conv1D(17, 17, activation='elu')(x)
+  x = layers.Dropout(0.1)(x)
   x = layers.Flatten()(x)
-
+  x = layers.Dense(20, activation='elu')(x)
   x = layers.Dropout(0.1)(x)
-  x = layers.Dense(20, activation='relu')(x)
-  x = layers.Dropout(0.1)(x)
-  x = layers.Dense(1, name="output", activation='sigmoid')(x)
+  x = layers.Dense(1, activation='sigmoid', name="final-dense")(x)
 
   model = keras.Model(inputs=inputs, outputs=x)
-  choosen_metrics = [metrics.BinaryAccuracy(), metrics.Precision(), metrics.Recall()]
-  model.compile(loss='binary_crossentropy', optimizer='adam', metrics=choosen_metrics)
+  choosen_metrics = [metrics.Recall(), metrics.Precision()]
+  model.compile(loss='binary_crossentropy', optimizer='rmsprop', metrics=choosen_metrics)
   return model
 
 def main(dataset_generator):
